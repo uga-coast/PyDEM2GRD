@@ -6,7 +6,7 @@
 #----------------------------------------------------------
 #----------------------------------------------------------
 import PyAdcirc
-from dem2grd.src.interpolate import interpolate 
+from pydem2grd.src.interpolate import interpolate 
 #----------------------------------------------------------
 
 def run(): 
