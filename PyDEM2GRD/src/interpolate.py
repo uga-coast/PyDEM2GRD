@@ -5,11 +5,16 @@
 # M O D U L E S                                   
 #----------------------------------------------------------
 #----------------------------------------------------------
+import sys
+import csv
 import PyAdcirc
 import gdal
 import numpy as np
+import operator
+import math
 from shapely.geometry import box    
 from shapely.geometry import Point 
+from shapely.geometry import Polygon 
 from gdalconst import GA_ReadOnly
 from raster import get_rastersize
 from raster import get_numrowcol
@@ -22,7 +27,8 @@ from raster import coord2pixel
 # F U N C T I O N    G R I D D A T A
 #
 #----------------------------------------------------------
-def griddata(mesh,raster,values,numvaluesgathered):
+#def griddata(mesh,raster,values,numvaluesgathered):
+def griddata(mesh):
     
     meshconn = mesh.connectivity()
 
@@ -30,31 +36,88 @@ def griddata(mesh,raster,values,numvaluesgathered):
     xc = np.zeros(mesh.numElements())
     yc = np.zeros(mesh.numElements())
     for i in range(mesh.numElements()-1):
-        x1 = mesh.node(meshconn[i][0]).x()
-        x2 = mesh.node(meshconn[i][1]).x()
-        x3 = mesh.node(meshconn[i][2]).x()
-        y1 = mesh.node(meshconn[i][0]).y()
-        y2 = mesh.node(meshconn[i][1]).y()
-        y3 = mesh.node(meshconn[i][2]).y()
 
+        x1 = mesh.node(mesh.nodeIndexById(meshconn[i][0])).x()
+        x2 = mesh.node(mesh.nodeIndexById(meshconn[i][1])).x()
+        x3 = mesh.node(mesh.nodeIndexById(meshconn[i][2])).x()
+        
+        y1 = mesh.node(mesh.nodeIndexById(meshconn[i][0])).y()
+        y2 = mesh.node(mesh.nodeIndexById(meshconn[i][1])).y()
+        y3 = mesh.node(mesh.nodeIndexById(meshconn[i][2])).y()
+
+        # Calculate the centroid (xc,yc)
         xc[i] = (x1 + x2 + x3) / 3
         yc[i] = (y1 + y2 + y3) / 3
 
+    # Grab the mesh nodes along the boundary
+    boundaryNodesPntr = mesh.boundaryNodes()
+    boundaryNodes = []
+    for i in range(len(boundaryNodesPntr)):
+        boundaryNodes.append(int(boundaryNodesPntr[i].id()))
 
     # Create a polygon of the Voronoi Diagram about each node
-
     for i in range(mesh.numNodes()):
 
-        # Find the number of elements that surround node i
+        # Get the number of elements that surround node i
         numElem = mesh.numElementsAroundNode(i)
 
-        # Find the elements that are connected to node i
-        neiElem = np.zeros(numElem)
-
+        # Use the elements that are connected to node i
+        # to construct a Voroni Polygon
+        pointList = []
         for j in range(numElem):
-            neiElem[j] = mesh.elementTable(mesh.node(i),j).id()
+            # Build a polygon of centroids (vornoi diagram)
 
-        # Build a polygon of centroids (vornoi diagram)
+            pointList.append((xc[mesh.elementTable(mesh.node(i),j).id()-1],
+                yc[mesh.elementTable(mesh.node(i),j).id()-1]))
+            
+        # Check if the mesh node is a boundary node.
+        # If so, then the Voroni Diagram should be constructed with
+        # the centroids as well as the mid-point along each boundary
+        # line segment and the node coordinates itself
+        if (mesh.node(i).id() in boundaryNodes):
+            print 'Boundary node found...'
+            # Add current mesh node coordinates to polygon
+            pointList.append((mesh.node(i).x(),mesh.node(i).y()))
+
+            # Find the other line segments that
+            # Search the other nodes of the connected elements to find the 
+            # other two boundary nodes
+            for j in range(numElem):
+                
+                #print meshconn[j] # This is the nodes that make up the element
+                for k in range(3): # 3 for 3 nodes make up an element
+                    
+                    # Skip the current nodes as its already been added to pointList
+                    if meshconn[j][k] == mesh.node(i).id():
+                        continue
+
+                    # If one of the connected mesh nodes is on the boundary,
+                    # then find the mid-point to the current mesh node
+                    # and add that to pointList
+                    if (meshconn[j][k] in boundaryNodes):
+                        # Find mid-point and add to pointList
+                        xmid = 0.5 * (mesh.node(i).x() + mesh.node(mesh.nodeIndexById(meshconn[j][k])).x())
+                        ymid = 0.5 * (mesh.node(i).y() + mesh.node(mesh.nodeIndexById(meshconn[j][k])).y())
+                        
+                        pointList.append((xmid,ymid))
+
+        # Sort the points in a clockwise fashion
+        # https://stackoverflow.com/questions/51074984/sorting-according-to-clockwise-point-coordinates
+        center = tuple(map(operator.truediv, reduce(lambda x, y: map(operator.add, x, y), pointList), [len(pointList)] * 2))
+        pointList = (sorted(pointList, key=lambda coord: (-135 - math.degrees(math.atan2(*tuple(map(operator.sub, coord, center))[::-1]))) % 360))
+        '''   
+        if mesh.node(i).id() == 4:
+            rows = zip(pointList)
+            with open('VoroniDiagram.csv', 'wb') as myfile:
+                    wr = csv.writer(myfile,sys.stdout, delimiter="\t", quoting = csv.QUOTE_NONE)
+                    #wr.writerow(pointList)
+                    for row in rows:
+                        wr.writerow(row)
+            quit()
+          ''' 
+        
+        # Generate a polygon of the pointList
+        vor = Polygon(pointList)
 
         # Find raster cells within polygon
 

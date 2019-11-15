@@ -7,6 +7,7 @@
 #----------------------------------------------------------
 import PyAdcirc
 from pydem2grd.src.interpolate import interpolate 
+from pydem2grd.src.interpolate import griddata
 #----------------------------------------------------------
 
 def run():
@@ -24,6 +25,8 @@ def run():
         exit(ierr)
     print 'Building element table...'
     mymesh.buildElementTable()
+    
+    griddata(mymesh)
   
     print 'Interpolating...'
     intmesh = interpolate(mymesh,'rasterlist.txt',0.5,mfac)
