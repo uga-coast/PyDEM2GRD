@@ -42,14 +42,10 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
     
     # Create a polygon of the Voronoi Diagram about each node
     for i in range(mesh.numNodes()):
-        if mesh.node(i).id() != 9775:
-            continue
 
         bufr = 1.25 * mesh.size[i] * rastersize
         if ( not bboxPoly.buffer(bufr).contains(Point(mesh.node(i).x(),mesh.node(i).y())) or
                 (mesh.node(i).z() > -999.0) ):
-            #numvaluesgathered[i] = 1
-            #values[i] = mesh.node(i).z()
             continue
 
         # Get the number of elements that surround node i
@@ -73,10 +69,7 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
        
             # If a boundary node is outside the raster, then skip it
             if ( not bboxPoly.contains(Point(mesh.node(i).x(),mesh.node(i).y())) ):
-                #numvaluesgathered[i] = 1
-                #values[i] = mesh.node(i).z()
                 continue
-            
             
             # Add current mesh node coordinates to polygon
             pointList.append((mesh.node(i).x(),mesh.node(i).y()))
@@ -162,7 +155,7 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
         # https://stackoverflow.com/questions/51074984/sorting-according-to-clockwise-point-coordinates
         center = tuple(map(operator.truediv, reduce(lambda x, y: map(operator.add, x, y), pointList), [len(pointList)] * 2))
         pointList = (sorted(pointList, key=lambda coord: (-135 - math.degrees(math.atan2(*tuple(map(operator.sub, coord, center))[::-1]))) % 360))
-        #'''   
+        '''   
         if mesh.node(i).id() == 9775:
             rows = zip(pointList)
             with open('VoroniDiagram.csv', 'wb') as myfile:
@@ -171,7 +164,7 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
                     for row in rows:
                         wr.writerow(row)
             quit()
-        #''' 
+        ''' 
         
         # Generate a polygon of the pointList
         vor = Polygon(pointList)
@@ -288,7 +281,6 @@ def gathervalues(mesh,raster,mfac,values,numvaluesgathered):
 
         # Check if node is inside the raster bbox + some buffer
         # Only interpolate on flagged nodes
-        #bufr = 2 * N[i] * rastersize
         bufr = 1.2 * N[i] * rastersize
         if ( not bboxPoly.buffer(bufr).contains(Point(mesh.node(i).x(),mesh.node(i).y())) or
                 (mesh.node(i).z() > -999.0) ):
@@ -314,8 +306,6 @@ def gathervalues(mesh,raster,mfac,values,numvaluesgathered):
         # Check for negative col/row values in the stencil
         if ( (left < 0) and (bottom < 0) ):
             #print(i+1,'Does not overlap')
-            #numvaluesgathered[i] = 1
-            #values[i] = mesh.node(i).z()
             continue
 
         # Check to make sure the stencil does not go off the raster
@@ -346,17 +336,6 @@ def gathervalues(mesh,raster,mfac,values,numvaluesgathered):
             # Sum values in the stencil
             values[i] = values[i] + np.sum(subset)
             numvaluesgathered[i] = numvaluesgathered[i] + np.size(subset)
-            '''
-            for c in range(left,right):
-                for r in range(top,bottom):
-                    if ((c > 0) and (c < numcols) and (r < numrows) and (r > 0)):
-                        if vals[r][c] > -999:
-                            values[i] = values[i] + vals[r][c]
-                            numvaluesgathered[i] = numvaluesgathered[i] + 1
-            #print 'Total: ',values[i]
-            #print 'NumCells: ',numvaluesgathered[i]
-            #print ''
-            '''
         else:
             print(i+1,'Does not overlap')
             continue
