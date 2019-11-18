@@ -36,16 +36,20 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
     values = np.zeros(mesh.numNodes())
     numvaluesgathered = np.zeros(mesh.numNodes())
     
+    mesh.size = mesh.computeMeshSize()
+    
     data = gdal.Open(raster, GA_ReadOnly)
     bbox = get_boundingbox(data)
     bboxPoly = box(bbox[0],bbox[1],bbox[2],bbox[3])
-  
+    rastersize = get_rastersize(data)
+    
     # Create a polygon of the Voronoi Diagram about each node
     for i in range(mesh.numNodes()):
         #if mesh.node(i).id() != 14023:
             #continue
 
-        if ( not bboxPoly.contains(Point(mesh.node(i).x(),mesh.node(i).y())) or
+        bufr = 1.25 * mesh.size[i] * rastersize
+        if ( not bboxPoly.buffer(bufr).contains(Point(mesh.node(i).x(),mesh.node(i).y())) or
                 (mesh.node(i).z() > -999.0) ):
             numvaluesgathered[i] = 1
             values[i] = mesh.node(i).z()
@@ -69,6 +73,14 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
         # line segment and the node coordinates itself
         if (mesh.node(i).id() in boundaryNodes):
             #print 'Boundary node found...'
+       
+            # If a boundary node is outside the raster, then skip it
+            if ( not bboxPoly.contains(Point(mesh.node(i).x(),mesh.node(i).y())) ):
+                numvaluesgathered[i] = 1
+                values[i] = mesh.node(i).z()
+                continue
+            
+            
             # Add current mesh node coordinates to polygon
             pointList.append((mesh.node(i).x(),mesh.node(i).y()))
 
