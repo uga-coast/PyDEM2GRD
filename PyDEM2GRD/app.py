@@ -27,7 +27,8 @@ def run():
     mymesh.buildElementTable()
    
     print 'Interpolating...'
-    imethod = 'griddata'
+    #imethod = 'griddata'
+    imethod = 'CA'
     intmesh = interpolate(mymesh,'rasterlist.txt',0.5,mfac,imethod)
     
     intmesh.write('fort_z.grd')

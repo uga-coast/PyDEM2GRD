@@ -33,9 +33,6 @@ from rasterio.mask import mask
 #----------------------------------------------------------
 def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathered):
         
-    values = np.zeros(mesh.numNodes())
-    numvaluesgathered = np.zeros(mesh.numNodes())
-    
     mesh.size = mesh.computeMeshSize()
     
     data = gdal.Open(raster, GA_ReadOnly)
@@ -45,14 +42,14 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
     
     # Create a polygon of the Voronoi Diagram about each node
     for i in range(mesh.numNodes()):
-        #if mesh.node(i).id() != 14023:
-            #continue
+        if mesh.node(i).id() != 9775:
+            continue
 
         bufr = 1.25 * mesh.size[i] * rastersize
         if ( not bboxPoly.buffer(bufr).contains(Point(mesh.node(i).x(),mesh.node(i).y())) or
                 (mesh.node(i).z() > -999.0) ):
-            numvaluesgathered[i] = 1
-            values[i] = mesh.node(i).z()
+            #numvaluesgathered[i] = 1
+            #values[i] = mesh.node(i).z()
             continue
 
         # Get the number of elements that surround node i
@@ -76,8 +73,8 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
        
             # If a boundary node is outside the raster, then skip it
             if ( not bboxPoly.contains(Point(mesh.node(i).x(),mesh.node(i).y())) ):
-                numvaluesgathered[i] = 1
-                values[i] = mesh.node(i).z()
+                #numvaluesgathered[i] = 1
+                #values[i] = mesh.node(i).z()
                 continue
             
             
@@ -103,8 +100,6 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
 
             '''
             # Stil working on this ...
-            # For now, just check to see if the current node is in the raster
-            else:
 
                 # Find the other line segments that
                 # Search the other nodes of the connected elements to find the 
@@ -167,8 +162,8 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
         # https://stackoverflow.com/questions/51074984/sorting-according-to-clockwise-point-coordinates
         center = tuple(map(operator.truediv, reduce(lambda x, y: map(operator.add, x, y), pointList), [len(pointList)] * 2))
         pointList = (sorted(pointList, key=lambda coord: (-135 - math.degrees(math.atan2(*tuple(map(operator.sub, coord, center))[::-1]))) % 360))
-        '''   
-        if mesh.node(i).id() == 14023:
+        #'''   
+        if mesh.node(i).id() == 9775:
             rows = zip(pointList)
             with open('VoroniDiagram.csv', 'wb') as myfile:
                     wr = csv.writer(myfile,sys.stdout, delimiter="\t", quoting = csv.QUOTE_NONE)
@@ -176,7 +171,7 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
                     for row in rows:
                         wr.writerow(row)
             quit()
-        ''' 
+        #''' 
         
         # Generate a polygon of the pointList
         vor = Polygon(pointList)
@@ -219,8 +214,8 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
         # Remove no data values to mitigate any overflow issues
         subset = subset[subset > ndv]
         subset = subset * mfac
-        numvaluesgathered[i] = subset.size
-        values[i] = np.sum(subset)
+        numvaluesgathered[i] = numvaluesgathered[i] + subset.size
+        values[i] = values[i] + np.sum(subset)
 
     return(values,numvaluesgathered)
    
@@ -297,8 +292,6 @@ def gathervalues(mesh,raster,mfac,values,numvaluesgathered):
         bufr = 1.2 * N[i] * rastersize
         if ( not bboxPoly.buffer(bufr).contains(Point(mesh.node(i).x(),mesh.node(i).y())) or
                 (mesh.node(i).z() > -999.0) ):
-            numvaluesgathered[i] = 1
-            values[i] = mesh.node(i).z()
             continue
 
         # Check if the total number of cells have already been acquired
@@ -321,8 +314,8 @@ def gathervalues(mesh,raster,mfac,values,numvaluesgathered):
         # Check for negative col/row values in the stencil
         if ( (left < 0) and (bottom < 0) ):
             #print(i+1,'Does not overlap')
-            numvaluesgathered[i] = 1
-            values[i] = mesh.node(i).z()
+            #numvaluesgathered[i] = 1
+            #values[i] = mesh.node(i).z()
             continue
 
         # Check to make sure the stencil does not go off the raster
@@ -367,7 +360,7 @@ def gathervalues(mesh,raster,mfac,values,numvaluesgathered):
         else:
             print(i+1,'Does not overlap')
             continue
-
+    
     return(values,numvaluesgathered)
 #----------------------------------------------------------
     
@@ -390,6 +383,7 @@ def interpolate(mesh,rasterlist,minBathyDepth,mfac,imethod):
     meshconn, xc, yc, boundaryNodes = meshconnectivity(mesh)
     
     for f in files:
+        print f
         # Cycle through each raster
         if imethod == "CA":
             a,b = gathervalues(mesh,f.split()[0],mfac,val,numval)
