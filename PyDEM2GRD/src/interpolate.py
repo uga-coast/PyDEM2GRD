@@ -5,9 +5,10 @@
 # M O D U L E S                                   
 #----------------------------------------------------------
 #----------------------------------------------------------
+import PyAdcirc
+import rasterio
 import sys
 import csv
-import PyAdcirc
 import gdal
 import numpy as np
 import operator
@@ -15,21 +16,26 @@ import math
 from shapely.geometry import box    
 from shapely.geometry import Point 
 from shapely.geometry import Polygon 
+from shapely.geometry import mapping
 from gdalconst import GA_ReadOnly
 from raster import get_rastersize
 from raster import get_numrowcol
 from raster import get_boundingbox
 from raster import pixel2coord
 from raster import coord2pixel
+#from rasterstats import zonal_stats
+from rasterio.mask import mask
 #----------------------------------------------------------
 
 #----------------------------------------------------------
 # F U N C T I O N    G R I D D A T A
 #
 #----------------------------------------------------------
-#def griddata(mesh,raster,values,numvaluesgathered):
-def griddata(mesh):
+def griddata(mesh,raster,mfac,values,numvaluesgathered):
     
+    values = np.zeros(mesh.numNodes())
+    numvaluesgathered = np.zeros(mesh.numNodes())
+   
     meshconn = mesh.connectivity()
 
     # Find the centroid of the elements
@@ -75,7 +81,7 @@ def griddata(mesh):
         # the centroids as well as the mid-point along each boundary
         # line segment and the node coordinates itself
         if (mesh.node(i).id() in boundaryNodes):
-            print 'Boundary node found...'
+            #print 'Boundary node found...'
             # Add current mesh node coordinates to polygon
             pointList.append((mesh.node(i).x(),mesh.node(i).y()))
 
@@ -119,14 +125,37 @@ def griddata(mesh):
         # Generate a polygon of the pointList
         vor = Polygon(pointList)
 
-        # Find raster cells within polygon
+        # Mapping converts the vor polygon to a GeoJSON-like mapping of a geometric object.
+        # This is needed for the mask operation below
+        geoms = [mapping(vor)]
+        # https://rasterio.readthedocs.io/en/stable/api/rasterio.mask.html
+        # https://rasterio.readthedocs.io/en/stable/topics/masking-by-shapefile.html
+        with rasterio.open(raster) as src:
+            ndv = src.nodata
+            out_image, out_transform = mask(src,geoms,crop=True)
+        # For Debugging
+        # Writes out the masked raster
+        # https://rasterio.readthedocs.io/en/stable/topics/masking-by-shapefile.html
+        '''
+        out_meta = src.meta
+        out_meta.update({"driver": "GTiff",
+            "height": out_image.shape[1],
+            "width" : out_image.shape[2],
+            "transform": out_transform})
+        with rasterio.open("01_test.tif", "w", **out_meta) as dest:
+            dest.write(out_image)
+        '''
+
+        # Convert the subset matrix to an array
+        subset = np.asarray(out_image)
+        # Remove no data values to mitigate any overflow issues
+        subset = subset[subset > ndv]
+        subset = subset * mfac
+        numvaluesgathered[i] = subset.size
+        values[i] = np.sum(subset)
 
 
-    #return(values)
-
-
-
-    # Compute # of cells for each node
+    return(values,numvaluesgathered)
 
 #----------------------------------------------------------
 # F U N C T I O N    G A T H E R V A L U E S      
@@ -247,7 +276,7 @@ def gathervalues(mesh,raster,mfac,values,numvaluesgathered):
 # DEM values to the mesh.
 # result = function(mesh, rasterlist)
 #----------------------------------------------------------
-def interpolate(mesh,rasterlist,minBathyDepth,mfac):
+def interpolate(mesh,rasterlist,minBathyDepth,mfac,imethod):
     # Grab list of raster files
     f = open(rasterlist,'r')
     files = f.readlines()
@@ -255,8 +284,10 @@ def interpolate(mesh,rasterlist,minBathyDepth,mfac):
     numval = np.zeros(mesh.numNodes())
     for f in files:
         # Cycle through each raster
-        #griddata(mesh,f.split()[0],val,numval)
-        a,b = gathervalues(mesh,f.split()[0],mfac,val,numval)
+        if imethod == "CA":
+            a,b = gathervalues(mesh,f.split()[0],mfac,val,numval)
+        elif imethod == "griddata":
+            a,b = griddata(mesh,f.split()[0],mfac,val,numval)
         val = a
         numval = b
 

@@ -18,17 +18,17 @@ def run():
     mfac = -1.0
 
     #mymesh = PyAdcirc.Mesh(inmeshfile)
-    mymesh = PyAdcirc.Mesh('initial-sub.grd')
+    #mymesh = PyAdcirc.Mesh('initial-sub.grd')
+    mymesh = PyAdcirc.Mesh('temp.grd')
     print 'Reading mesh...'
     ierr = mymesh.read()
     if ierr == 0:
         exit(ierr)
     print 'Building element table...'
     mymesh.buildElementTable()
-    
-    griddata(mymesh)
-  
+   
     print 'Interpolating...'
-    intmesh = interpolate(mymesh,'rasterlist.txt',0.5,mfac)
+    imethod = 'griddata'
+    intmesh = interpolate(mymesh,'rasterlist.txt',0.5,mfac,imethod)
     
     intmesh.write('fort_z.grd')
