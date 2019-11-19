@@ -387,7 +387,7 @@ def interpolate(mesh,rasterlist,minBathyDepth,mfac,imethod):
             newrastersize = get_rastersize(data)
             if (abs(rastersize-newrastersize) > 0.10): # Raster size changed > 10 cm
                 # Re-calculate N and CA based on the updated raster size
-                print 'Raster size changed. Re-calculating N & CA'
+                print('Raster size changed from ',rastersize,' to ',newrastersize,'. Re-calculating N & CA.')
                 rastersize = newrastersize
                 numCells = compute_numcells(mesh,rastersize)
                 numCells = np.asarray(numCells)
