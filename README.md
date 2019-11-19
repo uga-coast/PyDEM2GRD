@@ -12,7 +12,7 @@ python -m pydem2grd
 What things you need to install the software and how to install them
 
 ```
-Give examples
+*[ADCIRC Modules](https://github.com/zcobell/ADCIRCModules)
 ```
 
 ### Installing
