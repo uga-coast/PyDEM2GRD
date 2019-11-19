@@ -87,6 +87,7 @@ This project is licensed under the *** License - see the [LICENSE.md](LICENSE.md
 
 ## Acknowledgments
 
+* [Zach Cobell](https://github.com/zcobell)
 * Hat tip to anyone whose code was used
 * Inspiration
 * etc
