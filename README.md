@@ -11,9 +11,10 @@ python -m pydem2grd
 
 What things you need to install the software and how to install them
 
-```
 *[ADCIRC Modules](https://github.com/zcobell/ADCIRCModules)
-```
+*[GDAL](https://pypi.org/project/GDAL/)
+*[shapely](https://shapely.readthedocs.io/en/stable/)
+*[rasterio](https://rasterio.readthedocs.io/en/stable/#)
 
 ### Installing
 
@@ -39,27 +40,7 @@ Explain how to run the automated tests for this system
 
 ### Break down into end to end tests
 
-Explain what these tests test and why
-
-```
-Give an example
-```
-
-### And coding style tests
-
-Explain what these tests test and why
-
-```
-Give an example
-```
-
-## Deployment
-
-Add additional notes about how to deploy this on a live system
-
 ## Built With
-
-These are examples... Need to change
 
 * [ADCIRC Modules](https://github.com/zcobell/ADCIRCModules) - The ADCIRC file I/O used
 
@@ -76,6 +57,29 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 * **Matthew V Bilskie, PhD** - *Initial work* - (https://github.com/mattbilskie)
 
 See also the list of [contributors](https://github.com/mattbilskie/PyDEM2GRD/contributors) who participated in this project.
+
+## Citation
+
+Please appropriatley cite this work in publications, techincal reports, source code, etc. as:
+
+'''
+@article{Bilskie:2015,
+   author = {Bilskie, Matthew V. and Coggin, David and Hagen, Scott C. and Medeiros, Stephen C.},
+   title = {Terrain-driven unstructured mesh development through semi-automatic vertical feature extraction},
+   journal = {Advances in Water Resources},
+   volume = {86, Part A},
+   pages = {102-118},
+   ISSN = {0309-1708},
+   DOI = {http://dx.doi.org/10.1016/j.advwatres.2015.09.020},
+   url = {http://www.sciencedirect.com/science/article/pii/S0309170815002274},
+   year = {2015},
+   type = {Journal Article}
+}
+'''
+
+## Notes
+
+This project is still under development.
 
 ## License
 
