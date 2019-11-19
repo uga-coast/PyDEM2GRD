@@ -256,7 +256,7 @@ def meshconnectivity(mesh):
 # Sums up the raster pixel values within stencil
 # result = function(mesh, raster, values, numvaluesgathered)
 #----------------------------------------------------------
-def gathervalues(mesh,raster,mfac,values,numvaluesgathered):
+def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
 
     data = gdal.Open(raster, GA_ReadOnly)
     # Find the total number of rows and columns in the raster
@@ -269,10 +269,12 @@ def gathervalues(mesh,raster,mfac,values,numvaluesgathered):
 
     rastersize = get_rastersize(data)
     
+    '''
     numCells = compute_numcells(mesh,rastersize)
     numCells = np.asarray(numCells)
     N = numCells[0,:]
     CA = numCells[1,:]
+    '''
 
     bbox = get_boundingbox(data)
     bboxPoly = box(bbox[0],bbox[1],bbox[2],bbox[3])
@@ -281,9 +283,17 @@ def gathervalues(mesh,raster,mfac,values,numvaluesgathered):
 
         # Check if node is inside the raster bbox + some buffer
         # Only interpolate on flagged nodes
-        bufr = 1.2 * N[i] * rastersize
-        if ( not bboxPoly.buffer(bufr).contains(Point(mesh.node(i).x(),mesh.node(i).y())) or
-                (mesh.node(i).z() > -999.0) ):
+        if mesh.node(i).z() > -999.0:
+            continue
+        #bufr = 1.2 * N[i] * rastersize
+        #if not bboxPoly.buffer(bufr).contains(Point(mesh.node(i).x(),mesh.node(i).y())):
+        #    continue
+
+
+        #if not bboxPoly.contains(Point(mesh.node(i).x(),mesh.node(i).y())):
+        #    continue
+        if ( mesh.node(i).x() < bbox[0] ) or ( mesh.node(i).x() > bbox[2] ) or \
+                ( mesh.node(i).y() < bbox[1] ) or ( mesh.node(i).y() > bbox[3] ):
             continue
 
         # Check if the total number of cells have already been acquired
@@ -358,14 +368,33 @@ def interpolate(mesh,rasterlist,minBathyDepth,mfac,imethod):
     files = f.readlines()
     val = np.zeros(mesh.numNodes())
     numval = np.zeros(mesh.numNodes())
-    
-    meshconn, xc, yc, boundaryNodes = meshconnectivity(mesh)
-    
+   
+    # Compute the local mesh size (meters)
+    mesh.size = mesh.computeMeshSize()
+
+    if imethod == "griddata":
+        print 'Computing mesh connectivity...'
+        meshconn, xc, yc, boundaryNodes = meshconnectivity(mesh)
+        print 'done!'
+
+    rastersize = 0
     for f in files:
         print f
         # Cycle through each raster
         if imethod == "CA":
-            a,b = gathervalues(mesh,f.split()[0],mfac,val,numval)
+            # Check to see if raster size changed
+            data = gdal.Open(f.split()[0], GA_ReadOnly)
+            newrastersize = get_rastersize(data)
+            if (abs(rastersize-newrastersize) > 0.10): # Raster size changed > 10 cm
+                # Re-calculate N and CA based on the updated raster size
+                print 'Raster size changed. Re-calculating N & CA'
+                rastersize = newrastersize
+                numCells = compute_numcells(mesh,rastersize)
+                numCells = np.asarray(numCells)
+                N = numCells[0,:]
+                CA = numCells[1,:]
+
+            a,b = gathervalues(mesh,f.split()[0],N,CA,mfac,val,numval)
         elif imethod == "griddata":
             a,b = griddata(mesh,meshconn,xc,yc,boundaryNodes,f.split()[0],mfac,val,numval)
         val = a
@@ -404,7 +433,7 @@ def compute_numcells(mesh,rastersize):
     #mesh.reproject(26916)
 
     # Compute the local mesh size (meters)
-    mesh.size = mesh.computeMeshSize()
+    # mesh.size = mesh.computeMeshSize()
 
     sfactor = np.ones(mesh.numNodes())
     for i in range(mesh.numNodes()):
