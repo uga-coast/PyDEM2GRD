@@ -11,10 +11,10 @@ python -m pydem2grd
 
 What things you need to install the software and how to install them
 
-*[ADCIRC Modules](https://github.com/zcobell/ADCIRCModules)
-*[GDAL](https://pypi.org/project/GDAL/)
-*[shapely](https://shapely.readthedocs.io/en/stable/)
-*[rasterio](https://rasterio.readthedocs.io/en/stable/#)
+* [ADCIRC Modules](https://github.com/zcobell/ADCIRCModules)
+* [GDAL](https://pypi.org/project/GDAL/)
+* [shapely](https://shapely.readthedocs.io/en/stable/)
+* [rasterio](https://rasterio.readthedocs.io/en/stable/#)
 
 ### Installing
 
@@ -62,7 +62,7 @@ See also the list of [contributors](https://github.com/mattbilskie/PyDEM2GRD/con
 
 Please appropriatley cite this work in publications, techincal reports, source code, etc. as:
 
-'''
+```
 @article{Bilskie:2015,
    author = {Bilskie, Matthew V. and Coggin, David and Hagen, Scott C. and Medeiros, Stephen C.},
    title = {Terrain-driven unstructured mesh development through semi-automatic vertical feature extraction},
@@ -75,7 +75,7 @@ Please appropriatley cite this work in publications, techincal reports, source c
    year = {2015},
    type = {Journal Article}
 }
-'''
+```
 
 ## Notes
 
