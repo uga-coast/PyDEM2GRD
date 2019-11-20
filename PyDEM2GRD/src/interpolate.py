@@ -335,12 +335,17 @@ def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
             subset = subset[subset >= -999]
             subset = subset[subset <= 999]
             
+            # Check to make sure there are valid elevations in the stencil
+            if subset.size == 0:
+                continue
+
             # Check for vertical/raised feature nodes
             if mesh.node(i).z() == -2000:
 
                 # Find the mean and standard deviation
                 mean = np.average(subset)
                 std = np.std(subset)
+
 
                 # If the node is in the bounds of more than 1 raster,
                 # then keep the highest (minimum for ADCIRC) value.
@@ -354,7 +359,9 @@ def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
                     subset = subset[subset <= (mean - 2*std)]
                     values[i] = np.mean(subset)
                     numvaluesgathered[i] = -2000
-           
+                
+                print('Mesh Node ',mesh.node(i).id(),' is a raised feature node w/ elevation: ',values[i])
+                
             # Not flagged as a vertical/raised feature node
             else:
 
