@@ -8,9 +8,9 @@ These instructions will get you a copy of the project up and running on your loc
 python -m pydem2grd
 
 The following is a list of nodal flag values that are accepted.
-*-1000/-1001: Automatic CAA method of Bilskie and Hagen (2012). This flag value will create the most topographically accurate surface.
-*-10XX: Flagged values less than -1001 will use a CAA * XX value. This is used for smoothing. For example, a flag value of -1002 will mutliple the default CAA value by 2 thereby increasing the control volume/stencil by 2. A flag value of -1002 is a good choice that balances topographic accuracy and smoothness of the topobathy required for a numerical simulation.
-*-2000: This flag is used for vertical/raised feature nodes. Elevation values larger than mean + 2*sigma are averaged so the crown of a feature is captured.
+* -1000/-1001: Automatic CAA method of Bilskie and Hagen (2012). This flag value will create the most topographically accurate surface.
+* -10XX: Flagged values less than -1001 will use a CAA * XX value. This is used for smoothing. For example, a flag value of -1002 will mutliple the default CAA value by 2 thereby increasing the control volume/stencil by 2. A flag value of -1002 is a good choice that balances topographic accuracy and smoothness of the topobathy required for a numerical simulation.
+* -2000: This flag is used for vertical/raised feature nodes. Elevation values larger than mean + 2*sigma are averaged so the crown of a feature is captured.
 
 ## Prerequisites
 
