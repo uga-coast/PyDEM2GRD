@@ -14,12 +14,14 @@ def run():
     ''' 
     inmeshfile = raw_input('Name of mesh file: ')
     outmeshfile = raw_input('Name of output mesh file: ')
+    rlistfile = raw_input('Name of raster list file: ')
     mfac = float(raw_input('Multiplication factor (e.g. -1): '))
     '''
 
-    inmeshfile = "NGOM_SACS_Floodplain_v02_cleaned_ALLflagged.grd"
-    outmeshfile = "NGOM_SACS_Floodplain_v02_cleaned_2xCA_VF_z.grd"
+    inmeshfile = "NGOM_SACS_Floodplain_v02_cleaned_flagged.grd"
+    outmeshfile = "NGOM_SACS_Floodplain_v02_cleaned_2xCA_z.grd"
     mfac = float(-1.0)
+    rlistfile = 'rasterlist_all.txt'
 
     mymesh = PyAdcirc.Mesh(inmeshfile)
     print 'Reading mesh...'
@@ -32,7 +34,7 @@ def run():
     print 'Interpolating...'
     #imethod = 'griddata'
     imethod = 'CA'
-    intmesh = interpolate(mymesh,'rasterlist.txt',0.5,mfac,imethod)
+    intmesh = interpolate(mymesh,rlistfile,0.5,mfac,imethod)
     
     print  'Saving mesh file...'
     intmesh.write(outmeshfile)

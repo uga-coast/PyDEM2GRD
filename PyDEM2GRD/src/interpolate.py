@@ -310,27 +310,18 @@ def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
             #print(i+1,'Does not overlap')
             continue
 
-        # Check to make sure the stencil does not go off the raster
-        if top < 0:
-            top = 0
-        if bottom > numrows:
-            bottom = numrows
-        if left < 0:
-            left = 0
-        if right > numcols:
-            right = numcols
-
         # Find the x,y coordinates of the stencil and build polygon
         xmin,ymin = pixel2coord(left,bottom,data)
         xmax,ymax = pixel2coord(right,top,data)
         stencilPoly = box(xmin,ymin,xmax,ymax)
-
+        
         if (not stencilPoly.touches(bboxPoly)):
             # Find which stencil cells are contained in the raster
             subset = vals[top:bottom,left:right]
             
             # Convert the subset matrix to an array
             subset = np.asarray(subset)
+
             # Remove no data values to mitigate any overflow issues
             subset = subset[subset >= -999]
             subset = subset[subset <= 999]
@@ -345,7 +336,6 @@ def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
                 # Find the mean and standard deviation
                 mean = np.average(subset)
                 std = np.std(subset)
-
 
                 # If the node is in the bounds of more than 1 raster,
                 # then keep the highest (minimum for ADCIRC) value.
@@ -368,7 +358,9 @@ def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
                 # Sum values in the stencil
                 values[i] = values[i] + np.sum(subset)
                 numvaluesgathered[i] = numvaluesgathered[i] + np.size(subset)
+        
         else:
+            
             print(i+1,'Does not overlap')
             continue
     
