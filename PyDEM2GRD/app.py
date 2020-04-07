@@ -18,10 +18,13 @@ def run():
     mfac = float(raw_input('Multiplication factor (e.g. -1): '))
     '''
 
-    inmeshfile = "NGOM_SACS_Floodplain_v02_cleaned_flagged.grd"
-    outmeshfile = "NGOM_SACS_Floodplain_v02_cleaned_2xCA_z.grd"
+    inmeshfile = "holes_working_z.grd"     
+    outmeshfile = "holes_working_z2.grd"
     mfac = float(-1.0)
-    rlistfile = 'rasterlist_all.txt'
+    #minbath = 0.25
+    #minbath = -0.25
+    minbath = 0.00
+    rlistfile = 'rasterlist_NED.txt'
 
     mymesh = PyAdcirc.Mesh(inmeshfile)
     print 'Reading mesh...'
@@ -34,7 +37,7 @@ def run():
     print 'Interpolating...'
     #imethod = 'griddata'
     imethod = 'CA'
-    intmesh = interpolate(mymesh,rlistfile,0.5,mfac,imethod)
+    intmesh = interpolate(mymesh,rlistfile,minbath,mfac,imethod)
     
     print  'Saving mesh file...'
     intmesh.write(outmeshfile)
