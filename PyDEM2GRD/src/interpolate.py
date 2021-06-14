@@ -5,7 +5,7 @@
 # M O D U L E S                                   
 #----------------------------------------------------------
 #----------------------------------------------------------
-import PyAdcirc
+import pyadcircmodules
 import rasterio
 import sys
 import csv
@@ -18,13 +18,14 @@ from shapely.geometry import Point
 from shapely.geometry import Polygon 
 from shapely.geometry import mapping
 from gdalconst import GA_ReadOnly
-from raster import get_rastersize
-from raster import get_numrowcol
-from raster import get_boundingbox
-from raster import pixel2coord
-from raster import coord2pixel
+from .raster import get_rastersize
+from .raster import get_numrowcol
+from .raster import get_boundingbox
+from .raster import pixel2coord
+from .raster import coord2pixel
 #from rasterstats import zonal_stats
 from rasterio.mask import mask
+from functools import reduce
 #----------------------------------------------------------
 
 #----------------------------------------------------------
@@ -153,7 +154,7 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
 
         # Sort the points in a clockwise fashion
         # https://stackoverflow.com/questions/51074984/sorting-according-to-clockwise-point-coordinates
-        center = tuple(map(operator.truediv, reduce(lambda x, y: map(operator.add, x, y), pointList), [len(pointList)] * 2))
+        center = tuple(map(operator.truediv, reduce(lambda x, y: list(map(operator.add, x, y)), pointList), [len(pointList)] * 2))
         pointList = (sorted(pointList, key=lambda coord: (-135 - math.degrees(math.atan2(*tuple(map(operator.sub, coord, center))[::-1]))) % 360))
         '''   
         if mesh.node(i).id() == 9775:
@@ -287,7 +288,6 @@ def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
                 ( mesh.node(i).y() > bbox[3] + (N[i]+1*rastersize) ):
             continue
 
-
         # Check if the total number of cells have already been acquired
         if (numvaluesgathered[i] == CA[i]):
             continue
@@ -306,9 +306,16 @@ def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
         top = int(row - N[i])
         
         # Check for negative col/row values in the stencil
-        if ( (left < 0) and (bottom < 0) ):
-            #print(i+1,'Does not overlap')
-            continue
+        #if ( (left < 0) and (bottom < 0) ):
+            #continue
+        if top < 0:
+            top = 0
+        if bottom < 0:
+            bottom = 0
+        if left < 0:
+            left = 0
+        if right < 0:
+            right = 0
 
         # Find the x,y coordinates of the stencil and build polygon
         xmin,ymin = pixel2coord(left,bottom,data)
@@ -350,7 +357,7 @@ def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
                     values[i] = np.mean(subset)
                     numvaluesgathered[i] = -2000
                 
-                print('Mesh Node ',mesh.node(i).id(),' is a raised feature node w/ elevation: ',values[i])
+                print(('Mesh Node ',mesh.node(i).id(),' is a raised feature node w/ elevation: ',values[i]))
                 
             # Not flagged as a vertical/raised feature node
             else:
@@ -361,7 +368,7 @@ def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
         
         else:
             
-            print(i+1,'Does not overlap')
+            print((i+1,'Does not overlap'))
             continue
     
     return(values,numvaluesgathered)
@@ -387,13 +394,13 @@ def interpolate(mesh,rasterlist,minBathyDepth,mfac,imethod):
     mesh.size = mesh.computeMeshSize()
 
     if imethod == "griddata":
-        print 'Computing mesh connectivity...'
+        print('Computing mesh connectivity...')
         meshconn, xc, yc, boundaryNodes = meshconnectivity(mesh)
-        print 'done!'
+        print('done!')
 
     rastersize = 0
     for f in files:
-        print f
+        print(f)
         # Cycle through each raster
         if imethod == "CA":
             # Check to see if raster size changed
@@ -401,7 +408,7 @@ def interpolate(mesh,rasterlist,minBathyDepth,mfac,imethod):
             newrastersize = get_rastersize(data)
             if (abs(rastersize-newrastersize) > 0.10): # Raster size changed > 10 cm
                 # Re-calculate N and CA based on the updated raster size
-                print('Raster size changed from ',rastersize,' to ',newrastersize,'. Re-calculating N & CA.')
+                print(('Raster size changed from ',rastersize,' to ',newrastersize,'. Re-calculating N & CA.'))
                 rastersize = newrastersize
                 numCells = compute_numcells(mesh,rastersize)
                 numCells = np.asarray(numCells)
@@ -470,7 +477,7 @@ def compute_numcells(mesh,rastersize):
             sfactor[i] = 1.0
     
     # Compute N (# of DEM cells radiating omnidirectionally form the cell center)
-    N = map(lambda x: (0.25*x)/rastersize, mesh.size)
+    N = [(0.25*x)/rastersize for x in mesh.size]
     N = N * sfactor
     # Compute the total number of DEM cells to average
     N = np.asarray(N)
