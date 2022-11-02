@@ -5,7 +5,8 @@
 # M O D U L E S                                   
 #----------------------------------------------------------
 import numpy as np
-import gdal
+#import gdal
+from osgeo import gdal
 import rasterio
 from gdalconst import GA_ReadOnly
 #----------------------------------------------------------
