@@ -9,7 +9,7 @@ import pyadcircmodules
 import rasterio
 import sys
 import csv
-import gdal
+from osgeo import gdal
 import numpy as np
 import operator
 import math
