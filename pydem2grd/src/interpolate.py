@@ -17,13 +17,11 @@ from shapely.geometry import box
 from shapely.geometry import Point 
 from shapely.geometry import Polygon 
 from shapely.geometry import mapping
-from gdalconst import GA_ReadOnly
 from .raster import get_rastersize
 from .raster import get_numrowcol
 from .raster import get_boundingbox
 from .raster import pixel2coord
 from .raster import coord2pixel
-#from rasterstats import zonal_stats
 from rasterio.mask import mask
 from functools import reduce
 #----------------------------------------------------------
@@ -36,7 +34,7 @@ def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathe
         
     mesh.size = mesh.computeMeshSize()
     
-    data = gdal.Open(raster, GA_ReadOnly)
+    data = gdal.Open(raster, gdal.GA_ReadOnly)
     bbox = get_boundingbox(data)
     bboxPoly = box(bbox[0],bbox[1],bbox[2],bbox[3])
     rastersize = get_rastersize(data)
@@ -259,7 +257,7 @@ def meshconnectivity(mesh):
 #----------------------------------------------------------
 def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
 
-    data = gdal.Open(raster, GA_ReadOnly)
+    data = gdal.Open(raster, gdal.GA_ReadOnly)
     # Find the total number of rows and columns in the raster
     numcols, numrows = get_numrowcol(data)
     # Go ahead and load up raster values
@@ -404,7 +402,7 @@ def interpolate(mesh,rasterlist,minBathyDepth,mfac,imethod):
         # Cycle through each raster
         if imethod == "CA":
             # Check to see if raster size changed
-            data = gdal.Open(f.split()[0], GA_ReadOnly)
+            data = gdal.Open(f.split()[0], gdal.GA_ReadOnly)
             newrastersize = get_rastersize(data)
             if (abs(rastersize-newrastersize) > 0.10): # Raster size changed > 10 cm
                 # Re-calculate N and CA based on the updated raster size

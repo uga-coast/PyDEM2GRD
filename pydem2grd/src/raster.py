@@ -7,7 +7,6 @@
 import numpy as np
 from osgeo import gdal
 import rasterio
-from gdalconst import GA_ReadOnly
 #----------------------------------------------------------
 
 
