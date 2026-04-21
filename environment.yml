@@ -1,0 +1,11 @@
+name: pydem2grd
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - rasterio
+  - shapely
+  - pip
+  - pip:
+      - -e .

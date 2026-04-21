@@ -1,256 +1,248 @@
-# File: interpolate.py
-# Name: Matthew V. Bilskie
+from __future__ import annotations
 
-#----------------------------------------------------------
-# M O D U L E S                                   
-#----------------------------------------------------------
-#----------------------------------------------------------
-import pyadcircmodules
-import rasterio
-import sys
-import csv
-from osgeo import gdal
-import numpy as np
-import operator
 import math
-from shapely.geometry import box    
-from shapely.geometry import Point 
-from shapely.geometry import Polygon 
-from shapely.geometry import mapping
-from .raster import get_rastersize
-from .raster import get_numrowcol
-from .raster import get_boundingbox
-from .raster import pixel2coord
-from .raster import coord2pixel
-from rasterio.mask import mask
+import operator
 from functools import reduce
-#----------------------------------------------------------
+from pathlib import Path
+import numpy as np
+import rasterio
+from shapely.geometry import Point, Polygon, box, mapping
+from rasterio.mask import mask
 
-#----------------------------------------------------------
-# F U N C T I O N    G A T H E R V A L U E S      
-#----------------------------------------------------------
-#
-# Sums up the raster pixel values within stencil
-# result = function(mesh, raster, values, numvaluesgathered)
-#----------------------------------------------------------
-def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
+from .raster import (
+    coord2pixel,
+    get_boundingbox,
+    get_numrowcol,
+    get_rastersize,
+    open_raster,
+    pixel2coord,
+    read_band_as_array,
+)
 
-    data = gdal.Open(raster, gdal.GA_ReadOnly)
-    # Find the total number of rows and columns in the raster
-    numcols, numrows = get_numrowcol(data)
-    # Go ahead and load up raster values
-    band = data.GetRasterBand(1)
-    band.SetNoDataValue(-9999)
-    vals = band.ReadAsArray()
-    vals = vals * mfac
 
-    rastersize = get_rastersize(data)
-    
-    bbox = get_boundingbox(data)
-    bboxPoly = box(bbox[0],bbox[1],bbox[2],bbox[3])
-    
+def griddata(mesh, meshconn, xc, yc, boundaryNodes, raster, mfac, values, numvaluesgathered):
+    mesh.size = mesh.computeMeshSize()
+
+    with open_raster(raster) as data:
+        bbox = get_boundingbox(data)
+        bboxPoly = box(bbox[0], bbox[1], bbox[2], bbox[3])
+        rastersize = get_rastersize(data)
+
     for i in range(mesh.numNodes()):
-
-        # Check if node is inside the raster bbox + some buffer
-        # Only interpolate on flagged nodes
-        if mesh.node(i).z() > -999.0:
+        bufr = 1.25 * mesh.size[i] * rastersize
+        if (not bboxPoly.buffer(bufr).contains(Point(mesh.node(i).x(), mesh.node(i).y()))) or (
+            mesh.node(i).z() > -999.0
+        ):
             continue
 
-        # Check to make sure mesh node is inside the raster
-        # plus some buffer = rastersize * N 
-        if ( mesh.node(i).x() < bbox[0] - (N[i]+1*rastersize) ) or \
-                ( mesh.node(i).x() > bbox[2] + (N[i]+1*rastersize) ) or \
-                ( mesh.node(i).y() < bbox[1] - (N[i]+1*rastersize) ) or \
-                ( mesh.node(i).y() > bbox[3] + (N[i]+1*rastersize) ):
-            continue
+        numElem = mesh.numElementsAroundNode(i)
+        pointList = []
+        for j in range(numElem):
+            element = mesh.elementTable(mesh.node(i), j)
+            pointList.append((xc[element.id() - 1], yc[element.id() - 1]))
 
-        # Check if the total number of cells have already been acquired
-        if (numvaluesgathered[i] == CA[i]):
-            continue
+        if mesh.node(i).id() in boundaryNodes:
+            if not bboxPoly.contains(Point(mesh.node(i).x(), mesh.node(i).y())):
+                continue
+            pointList.append((mesh.node(i).x(), mesh.node(i).y()))
 
-        # Check if part of the stencil is inside the raster
-        col, row, inOut  = coord2pixel(mesh.node(i).x(),mesh.node(i).y(),data)
-        
-        #print "# Rows, # Columns ",numrows,numcols
-        #print "Row, Column ",row, col
+            if numElem == 1:
+                element = mesh.elementTable(mesh.node(i), 0)
+                for k in range(3):
+                    if meshconn[element.id() - 1][k] == mesh.node(i).id():
+                        continue
+                    neigh = mesh.nodeIndexById(meshconn[element.id() - 1][k])
+                    xmid = 0.5 * (mesh.node(i).x() + mesh.node(neigh).x())
+                    ymid = 0.5 * (mesh.node(i).y() + mesh.node(neigh).y())
+                    pointList.append((xmid, ymid))
 
-        # Get the stencil size in number of rows/cols around the current row/col
-        # Left to right and top to bottom nomenclature
-        left = int(col - N[i])
-        bottom = int(row + N[i])
-        right = int(col + N[i])
-        top = int(row - N[i])
-        
-        # Check for negative col/row values in the stencil
-        #if ( (left < 0) and (bottom < 0) ):
-            #continue
-        if top < 0:
-            top = 0
-        if bottom < 0:
-            bottom = 0
-        if left < 0:
-            left = 0
-        if right < 0:
-            right = 0
+        center = tuple(
+            map(
+                operator.truediv,
+                reduce(lambda x, y: list(map(operator.add, x, y)), pointList),
+                [len(pointList)] * 2,
+            )
+        )
+        pointList = sorted(
+            pointList,
+            key=lambda coord: (-135 - math.degrees(math.atan2(*tuple(map(operator.sub, coord, center))[::-1]))) % 360,
+        )
+        vor = Polygon(pointList)
+        geoms = [mapping(vor)]
 
-        # Find the x,y coordinates of the stencil and build polygon
-        xmin,ymin = pixel2coord(left,bottom,data)
-        xmax,ymax = pixel2coord(right,top,data)
-        stencilPoly = box(xmin,ymin,xmax,ymax)
-        
-        if (not stencilPoly.touches(bboxPoly)):
-            # Find which stencil cells are contained in the raster
-            subset = vals[top:bottom,left:right]
-            
-            # Convert the subset matrix to an array
+        with rasterio.open(raster) as src:
+            rbbox = Polygon(
+                [
+                    (src.bounds.left, src.bounds.bottom),
+                    (src.bounds.left, src.bounds.top),
+                    (src.bounds.right, src.bounds.top),
+                    (src.bounds.right, src.bounds.bottom),
+                ]
+            )
+            if not rbbox.intersects(vor):
+                continue
+            ndv = src.nodata
+            out_image, _ = mask(src, geoms, crop=True)
+
+        subset = np.asarray(out_image)
+        if ndv is not None:
+            subset = subset[subset > ndv]
+        subset = subset * mfac
+        numvaluesgathered[i] = numvaluesgathered[i] + subset.size
+        values[i] = values[i] + np.sum(subset)
+
+    return values, numvaluesgathered
+
+
+def meshconnectivity(mesh):
+    meshconn = mesh.connectivity()
+    xc = np.zeros(mesh.numElements())
+    yc = np.zeros(mesh.numElements())
+    for i in range(mesh.numElements()):
+        x1 = mesh.node(mesh.nodeIndexById(meshconn[i][0])).x()
+        x2 = mesh.node(mesh.nodeIndexById(meshconn[i][1])).x()
+        x3 = mesh.node(mesh.nodeIndexById(meshconn[i][2])).x()
+
+        y1 = mesh.node(mesh.nodeIndexById(meshconn[i][0])).y()
+        y2 = mesh.node(mesh.nodeIndexById(meshconn[i][1])).y()
+        y3 = mesh.node(mesh.nodeIndexById(meshconn[i][2])).y()
+
+        xc[i] = (x1 + x2 + x3) / 3.0
+        yc[i] = (y1 + y2 + y3) / 3.0
+
+    boundaryNodes = [int(node.id()) for node in mesh.boundaryNodes()]
+    return meshconn, xc, yc, boundaryNodes
+
+
+def gathervalues(mesh, raster, N, CA, mfac, values, numvaluesgathered):
+    with open_raster(raster) as data:
+        numcols, numrows = get_numrowcol(data)
+        vals = read_band_as_array(data).astype(float)
+        ndv = data.nodata
+        vals = vals * mfac
+        rastersize = get_rastersize(data)
+        bbox = get_boundingbox(data)
+        bboxPoly = box(bbox[0], bbox[1], bbox[2], bbox[3])
+
+        for i in range(mesh.numNodes()):
+            if mesh.node(i).z() > -999.0:
+                continue
+
+            if (
+                mesh.node(i).x() < bbox[0] - (N[i] + 1 * rastersize)
+                or mesh.node(i).x() > bbox[2] + (N[i] + 1 * rastersize)
+                or mesh.node(i).y() < bbox[1] - (N[i] + 1 * rastersize)
+                or mesh.node(i).y() > bbox[3] + (N[i] + 1 * rastersize)
+            ):
+                continue
+
+            if numvaluesgathered[i] == CA[i]:
+                continue
+
+            col, row = coord2pixel(mesh.node(i).x(), mesh.node(i).y(), data)
+            if row < 0 or col < 0:
+                continue
+
+            left = max(int(col - N[i]), 0)
+            bottom = max(int(row + N[i]), 0)
+            right = min(int(col + N[i]), numcols)
+            top = max(int(row - N[i]), 0)
+
+            xmin, ymin = pixel2coord(left, bottom, data)
+            xmax, ymax = pixel2coord(right, top, data)
+            stencilPoly = box(xmin, ymin, xmax, ymax)
+            if stencilPoly.touches(bboxPoly):
+                continue
+
+            subset = vals[top:bottom, left:right]
             subset = np.asarray(subset)
 
-            # Remove no data values to mitigate any overflow issues
+            if ndv is not None:
+                subset = subset[subset != ndv * mfac]
+            subset = subset[np.isfinite(subset)]
             subset = subset[subset >= -999]
             subset = subset[subset <= 999]
-            
-            # Check to make sure there are valid elevations in the stencil
             if subset.size == 0:
                 continue
 
-            # Check for vertical/raised feature nodes
             if mesh.node(i).z() == -2000:
-
-                # Find the mean and standard deviation
                 mean = np.average(subset)
                 std = np.std(subset)
-
-                # If the node is in the bounds of more than 1 raster,
-                # then keep the highest (minimum for ADCIRC) value.
-                if ( (mean - 2*std) < np.min(subset) ):
-
+                if (mean - 2 * std) < np.min(subset):
                     values[i] = np.min(subset)
                     numvaluesgathered[i] = -2000
-
                 else:
-
-                    subset = subset[subset <= (mean - 2*std)]
+                    subset = subset[subset <= (mean - 2 * std)]
                     values[i] = np.mean(subset)
                     numvaluesgathered[i] = -2000
-                
-                print(('Mesh Node ',mesh.node(i).id(),' is a raised feature node w/ elevation: ',values[i]))
-                
-            # Not flagged as a vertical/raised feature node
             else:
-
-                # Sum values in the stencil
                 values[i] = values[i] + np.sum(subset)
                 numvaluesgathered[i] = numvaluesgathered[i] + np.size(subset)
-        
-        else:
-            
-            print((i+1,'Does not overlap'))
-            continue
-    
-    return(values,numvaluesgathered)
-#----------------------------------------------------------
-    
 
-#----------------------------------------------------------
-# F U N C T I O N    I N T E R P O L A T E        
-#----------------------------------------------------------
-#
-# Cycle through a list of rasters and interpolate
-# DEM values to the mesh.
-# result = function(mesh, rasterlist)
-#----------------------------------------------------------
-def interpolate(mesh,rasterlist,minBathyDepth,mfac,imethod):
-    # Grab list of raster files
-    f = open(rasterlist,'r')
-    files = f.readlines()
-    val = np.zeros(mesh.numNodes())
-    numval = np.zeros(mesh.numNodes())
-   
-    # Compute the local mesh size (meters)
+    return values, numvaluesgathered
+
+
+def interpolate(mesh, rasterlist, minBathyDepth, mfac, imethod):
+    raster_paths = []
+    for line in Path(rasterlist).read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        raster_paths.append(stripped.split()[0])
+
+    val = np.zeros(mesh.numNodes(), dtype=float)
+    numval = np.zeros(mesh.numNodes(), dtype=float)
     mesh.size = mesh.computeMeshSize()
 
-    rastersize = 0
-    for f in files:
-        print(f)
-        # Cycle through each raster
-        # Check to see if raster size changed
-        data = gdal.Open(f.split()[0], gdal.GA_ReadOnly)
-        newrastersize = get_rastersize(data)
-        if (abs(rastersize-newrastersize) > 0.10): # Raster size changed > 10 cm
-            # Re-calculate N and CA based on the updated raster size
-            print(('Raster size changed from ',rastersize,' to ',newrastersize,'. Re-calculating N & CA.'))
-            rastersize = newrastersize
-            numCells = compute_numcells(mesh,rastersize)
-            numCells = np.asarray(numCells)
-            N = numCells[0,:]
-            CA = numCells[1,:]
+    if imethod == "griddata":
+        meshconn, xc, yc, boundaryNodes = meshconnectivity(mesh)
 
-        a,b = gathervalues(mesh,f.split()[0],N,CA,mfac,val,numval)
-        
-        val = a
-        numval = b
+    rastersize = 0.0
+    N = None
+    CA = None
+    for raster in raster_paths:
+        if imethod == "CA":
+            with open_raster(raster) as data:
+                newrastersize = get_rastersize(data)
+            if abs(rastersize - newrastersize) > 0.10 or N is None or CA is None:
+                rastersize = newrastersize
+                numCells = np.asarray(compute_numcells(mesh, rastersize))
+                N = numCells[0, :]
+                CA = numCells[1, :]
+            val, numval = gathervalues(mesh, raster, N, CA, mfac, val, numval)
+        elif imethod == "griddata":
+            val, numval = griddata(mesh, meshconn, xc, yc, boundaryNodes, raster, mfac, val, numval)
+        else:
+            raise ValueError(f"Unknown interpolation method: {imethod}")
 
-    interpvalues = np.zeros(mesh.numNodes())
+    interpvalues = np.zeros(mesh.numNodes(), dtype=float)
     for i in range(mesh.numNodes()):
-
-        if (numval[i] == 0):
-
+        if numval[i] == 0:
             interpvalues[i] = mesh.node(i).z()
-
-        elif (numval[i] == -2000):
-
+        elif numval[i] == -2000:
             interpvalues[i] = val[i]
-
-        elif (numval[i] != 0):
-
+        else:
             interpvalues[i] = val[i] / numval[i]
 
-        # Check for minimum bathy depth
-        #if interpvalues[i] >= 0 and interpvalues[i] < minBathyDepth:
-            #interpvalues[i] = minBathyDepth
-    
+        if interpvalues[i] >= 0 and interpvalues[i] < minBathyDepth:
+            interpvalues[i] = minBathyDepth
+
     mesh.setZ(interpvalues)
-    
     return mesh
-#----------------------------------------------------------
 
 
-#----------------------------------------------------------
-# F U N C T I O N    C O M P U T E _ N U M C E L L S
-#----------------------------------------------------------
-#
-# Compute the total numhber of DEM cells that should be 
-# interpolated for each mesh node using the CCA method
-# of Bilskie & Hagen (2013)
-# result = function(mesh, rastersize)
-#----------------------------------------------------------
-def compute_numcells(mesh,rastersize):
-
-    # mesh -> mesh object
-    # rastersize -> floating point of DEM cell size
-
-    # Reproject the mesh to UTM coordinates
-    #mesh.reproject(26916)
-
-    sfactor = np.ones(mesh.numNodes())
+def compute_numcells(mesh, rastersize):
+    sfactor = np.ones(mesh.numNodes(), dtype=float)
     for i in range(mesh.numNodes()):
-        
-        if (mesh.node(i).z() < -1001 ) and (mesh.node(i).z() > -1100) :
-            sfactor[i] = mesh.node(i).z()*-1 - 1000
-        
-        # values of -2000 or less are flagged as vertical/raised feature nodes
-        elif (mesh.node(i).z() == -2000):
+        if (mesh.node(i).z() < -1001) and (mesh.node(i).z() > -1100):
+            sfactor[i] = mesh.node(i).z() * -1 - 1000
+        elif mesh.node(i).z() == -2000:
             sfactor[i] = 2.0
-        
         else:
             sfactor[i] = 1.0
-    
-    # Compute N (# of DEM cells radiating omnidirectionally form the cell center)
-    N = [(0.25*x)/rastersize for x in mesh.size]
+
+    N = (0.25 * np.asarray(mesh.size)) / rastersize
     N = N * sfactor
-    # Compute the total number of DEM cells to average
-    N = np.asarray(N)
     N = np.round(N)
-    CA = np.piecewise(N, [N < 1, N >= 1], [1, (2*N+1)**2])
+    CA = np.where(N < 1, 1, (2 * N + 1) ** 2)
     return N, CA
-#----------------------------------------------------------

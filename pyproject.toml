@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pydem2grd"
+version = "0.1.0"
+description = "Interpolate DEM rasters onto ADCIRC-style meshes without ADCIRC Modules"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  {name = "OpenAI"}
+]
+license = {text = "MIT"}
+dependencies = [
+  "numpy",
+  "rasterio",
+  "shapely",
+]
+
+[project.scripts]
+pydem2grd = "pydem2grd.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["pydem2grd*"]

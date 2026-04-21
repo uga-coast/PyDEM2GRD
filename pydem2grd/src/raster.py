@@ -1,117 +1,44 @@
-# File: raster.py
-# Name: Matthew V. Bilskie
+from __future__ import annotations
 
-#----------------------------------------------------------
-# M O D U L E S                                   
-#----------------------------------------------------------
+from pathlib import Path
 import numpy as np
-from osgeo import gdal
 import rasterio
-#----------------------------------------------------------
+from rasterio.transform import rowcol, xy
 
 
-#----------------------------------------------------------
-# F U N C T I O N    G E T _ R A S T V A L U E    
-#----------------------------------------------------------
-#
-# Finds the raster value for a given row,col in a raster
-# result = function(row,col,gdal raster)
-#----------------------------------------------------------
-def get_rastvalue(col,row,rdata):
-    geoTransform = rdata.GetGeoTransform()
-    band = rdata.GetRasterBand(1)
-    vals = band.ReadAsArray()
-    return vals[col][row]
-#----------------------------------------------------------
+def open_raster(path: str | Path):
+    return rasterio.open(path)
 
-#----------------------------------------------------------
-# F U N C T I O N    G E T _ B O U N D I N G B O X
-#----------------------------------------------------------
-#
-# Finds the bounding box (xmin/ymin/xmax/ymax) for a raster
-# result = function(gdal raster)
-#----------------------------------------------------------
-def get_boundingbox(rdata):
-    geoTransform = rdata.GetGeoTransform()
-    minx = geoTransform[0]
-    maxy = geoTransform[3]
-    maxx = minx + geoTransform[1] * rdata.RasterXSize
-    miny = maxy + geoTransform[5] * rdata.RasterYSize
-    bbox = [minx, miny, maxx, maxy]
-    data = None
-    return bbox
-#----------------------------------------------------------
 
-#----------------------------------------------------------
-# F U N C T I O N    G E T _ N U M R O W C O L              
-#----------------------------------------------------------
-#
-# Finds the total number of rows and columns in a raster
-# result = function(gdal raster)
-#----------------------------------------------------------
-def get_numrowcol(rdata):
-    geoTransform = rdata.GetGeoTransform()
-    return rdata.RasterXSize, rdata.RasterYSize
-#----------------------------------------------------------
+def get_boundingbox(rdata) -> list[float]:
+    bounds = rdata.bounds
+    return [bounds.left, bounds.bottom, bounds.right, bounds.top]
 
-#----------------------------------------------------------
-# F U N C T I O N    I S I N R A S T E R              
-#----------------------------------------------------------
-#
-# Finds if a give mesh node is inside a raster
-# result = function(x,y,gdal raster)
-#----------------------------------------------------------
-def isinraster(x,y,rdata):
+
+def get_numrowcol(rdata) -> tuple[int, int]:
+    return rdata.width, rdata.height
+
+
+def isinraster(x: float, y: float, rdata) -> bool:
     bbox = get_boundingbox(rdata)
-    if ( (x > bbox[0]) and (x < bbox[2]) and
-            (y > bbox[1]) and (y < bbox[3]) ):
-        # Inside the raster bbox
-        return True
-    else:
-        return False
-#----------------------------------------------------------
+    return bbox[0] < x < bbox[2] and bbox[1] < y < bbox[3]
 
-#----------------------------------------------------------
-# F U N C T I O N    G E T _ R A S T E R S I Z E      
-#----------------------------------------------------------
-#
-# Finds if the cell size of a raster           
-# result = function(gdal raster)
-#----------------------------------------------------------
-def get_rastersize(rdata):
-    geoTransform = rdata.GetGeoTransform()
-    return geoTransform[1]
-#----------------------------------------------------------
 
-#----------------------------------------------------------
-# F U N C T I O N    C O O R D 2 P I X E L            
-#----------------------------------------------------------
-#
-# Finds the row and column for a given x,y pair in a raster
-# result = function(x,y,gdal raster)
-#----------------------------------------------------------
-def coord2pixel(x,y,rdata):
-    gt = rdata.GetGeoTransform()
-    col = np.int((x - gt[0]) / gt[1])
-    row = np.int((gt[3] - y) / -gt[5])
-    if (isinraster(x,y,rdata)):
-        inOut = 1
-    else:
-        inOut = -1
-    return col,row,inOut
+def get_rastersize(rdata) -> float:
+    return float(abs(rdata.transform.a))
 
-#----------------------------------------------------------
 
-#----------------------------------------------------------
-# F U N C T I O N    P I X E L 2 C O O R D            
-#----------------------------------------------------------
-#
-# Finds the row and column for a given x,y pair in a raster
-# result = function(row,col,gdal raster)
-#----------------------------------------------------------
-def pixel2coord(col,row,rdata):
-    xoff, a, b, yoff, d, e = rdata.GetGeoTransform()
-    x = a * col + b * row + xoff
-    y = d * col + e * row + yoff
-    return(x,y)
-#----------------------------------------------------------
+def coord2pixel(x: float, y: float, rdata) -> tuple[int, int]:
+    if not isinraster(x, y, rdata):
+        return -1, -1
+    row, col = rowcol(rdata.transform, x, y)
+    return int(col), int(row)
+
+
+def pixel2coord(col: int, row: int, rdata) -> tuple[float, float]:
+    x, y = xy(rdata.transform, row, col, offset="center")
+    return float(x), float(y)
+
+
+def read_band_as_array(rdata) -> np.ndarray:
+    return rdata.read(1)
