@@ -92,12 +92,13 @@ def get_rastersize(rdata):
 #----------------------------------------------------------
 def coord2pixel(x,y,rdata):
     gt = rdata.GetGeoTransform()
+    col = np.int((x - gt[0]) / gt[1])
+    row = np.int((gt[3] - y) / -gt[5])
     if (isinraster(x,y,rdata)):
-        col = np.int((x - gt[0]) / gt[1])
-        row = np.int((gt[3] - y) / -gt[5])
-        return col,row
+        inOut = 1
     else:
-        return (-1,-1)
+        inOut = -1
+    return col,row,inOut
 
 #----------------------------------------------------------
 
