@@ -105,6 +105,16 @@ class InterpolationTest(unittest.TestCase):
             mesh = interpolate(self._mesh(directory), raster_list, 0.0, 1.0, "CA")
             self.assertEqual(mesh.node(0).z(), -1001.0)
 
+    def test_ca_interpolation_does_not_reject_finite_values_by_range(self):
+        with tempfile.TemporaryDirectory() as directory:
+            values = np.full((3, 3), 1500.0, dtype="float32")
+            raster_path = self._raster(directory, values)
+            raster_list = Path(directory) / "rasters.txt"
+            raster_list.write_text(str(raster_path) + "\n", encoding="utf-8")
+
+            mesh = interpolate(self._mesh(directory), raster_list, 0.0, 1.0, "CA")
+            self.assertEqual(mesh.node(0).z(), 1500.0)
+
     def test_griddata_supports_non_contiguous_element_ids(self):
         with tempfile.TemporaryDirectory() as directory:
             raster_path = self._raster(
