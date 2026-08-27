@@ -1,46 +1,42 @@
-# File: app.py
-# Name: Matthew V. Bilskie
+"""Command-line application for PyDEM2GRD."""
 
-#----------------------------------------------------------
-# M O D U L E S                                   
-#----------------------------------------------------------
-#----------------------------------------------------------
-import pyadcircmodules
-from pydem2grd.src.interpolate import interpolate 
-from pydem2grd.src.interpolate import griddata
-#----------------------------------------------------------
+import argparse
 
-def run():
-    ''' 
-    inmeshfile = raw_input('Name of mesh file: ')
-    outmeshfile = raw_input('Name of output mesh file: ')
-    rlistfile = raw_input('Name of raster list file: ')
-    mfac = float(raw_input('Multiplication factor (e.g. -1): '))
-    '''
+from pydem2grd.mesh import Mesh
+from pydem2grd.src.interpolate import interpolate
 
-    inmeshfile = "flaggedx3_utm15.grd"     
-    outmeshfile = "interpolatedx3_z.grd"
-    mfac = float(-1.0)
-    #minbath = 0.25
-    #minbath = -0.25
-    minbath = 0.00
-    rlistfile = 'rasterlist.txt'
 
-    mymesh = pyadcircmodules.Mesh(inmeshfile)
-    print('Reading mesh...')
-    ierr = mymesh.read()
-    if ierr == 0:
-        exit(ierr)
-    print('Building element table...')
-    #mymesh.buildElementTable()
-    mymesh.topology().elementTable().build()
-   
-    print('Interpolating...')
-    #imethod = 'griddata'
-    imethod = 'CA'
-    intmesh = interpolate(mymesh,rlistfile,minbath,mfac,imethod)
+def _arguments(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Interpolate DEM elevations onto an ADCIRC fort.14 mesh."
+    )
+    parser.add_argument("input_mesh", help="input fort.14/ADCIRC grid file")
+    parser.add_argument("output_mesh", help="output fort.14/ADCIRC grid file")
+    parser.add_argument("raster_list", help="text file containing one raster path per line")
+    parser.add_argument("--multiplication-factor", "-m", type=float, default=-1.0)
+    parser.add_argument("--minimum-bathymetric-depth", type=float, default=0.0)
+    parser.add_argument("--method", choices=("CA", "griddata"), default="CA")
+    return parser.parse_args(argv)
+
+
+def run(argv=None):
+    args = _arguments(argv)
+    mesh = Mesh(args.input_mesh)
+    print("Reading mesh...")
+    mesh.read()
+    print("Building element table...")
+    mesh.buildElementTable()
+
+    print("Interpolating...")
+    interpolated_mesh = interpolate(
+        mesh,
+        args.raster_list,
+        args.minimum_bathymetric_depth,
+        args.multiplication_factor,
+        args.method,
+    )
     
-    print('Saving mesh file...')
-    intmesh.write(outmeshfile)
+    print("Saving mesh file...")
+    interpolated_mesh.write(args.output_mesh)
 
-    print('Finished! :)')
+    print("Finished.")

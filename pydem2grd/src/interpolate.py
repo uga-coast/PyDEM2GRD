@@ -1,485 +1,310 @@
-# File: interpolate.py
-# Name: Matthew V. Bilskie
+"""DEM-to-mesh interpolation routines."""
 
-#----------------------------------------------------------
-# M O D U L E S                                   
-#----------------------------------------------------------
-#----------------------------------------------------------
-import pyadcircmodules
-import rasterio
-import sys
-import csv
-from osgeo import gdal
-import numpy as np
-import operator
 import math
-from shapely.geometry import box    
-from shapely.geometry import Point 
-from shapely.geometry import Polygon 
-from shapely.geometry import mapping
-from .raster import get_rastersize
-from .raster import get_numrowcol
-from .raster import get_boundingbox
-from .raster import pixel2coord
-from .raster import coord2pixel
-from rasterio.mask import mask
+import operator
 from functools import reduce
-#----------------------------------------------------------
+from pathlib import Path
 
-#----------------------------------------------------------
-# F U N C T I O N    G R I D D A T A
-#
-#----------------------------------------------------------
-def griddata(mesh,meshconn,xc,yc,boundaryNodes,raster,mfac,values,numvaluesgathered):
-        
+import numpy as np
+import rasterio
+from rasterio.mask import mask
+from shapely.geometry import Point, Polygon, box, mapping
+
+from .raster import (
+    coord2pixel,
+    get_boundingbox,
+    get_numrowcol,
+    get_rastersize,
+    open_raster,
+    read_band_as_array,
+)
+
+
+def griddata(
+    mesh,
+    meshconn,
+    xc,
+    yc,
+    boundary_nodes,
+    raster,
+    multiplication_factor,
+    values,
+    num_values_gathered,
+):
+    """Gather raster cells within a centroid-based control polygon."""
     mesh.size = mesh.computeMeshSize()
-    
-    data = gdal.Open(raster, gdal.GA_ReadOnly)
-    bbox = get_boundingbox(data)
-    bboxPoly = box(bbox[0],bbox[1],bbox[2],bbox[3])
-    rastersize = get_rastersize(data)
-    
-    # Create a polygon of the Voronoi Diagram about each node
-    for i in range(mesh.numNodes()):
 
-        bufr = 1.25 * mesh.size[i] * rastersize
-        if ( not bboxPoly.buffer(bufr).contains(Point(mesh.node(i).x(),mesh.node(i).y())) or
-                (mesh.node(i).z() > -999.0) ):
+    with open_raster(raster) as data:
+        bbox = get_boundingbox(data)
+        bbox_polygon = box(*bbox)
+        raster_size = get_rastersize(data)
+
+    for index in range(mesh.numNodes()):
+        node = mesh.node(index)
+        buffer_radius = 1.25 * mesh.size[index] * raster_size
+        if not bbox_polygon.buffer(buffer_radius).contains(Point(node.x(), node.y())):
+            continue
+        if node.z() > -999.0:
             continue
 
-        # Get the number of elements that surround node i
-        numElem = mesh.numElementsAroundNode(i)
+        num_elements = mesh.numElementsAroundNode(index)
+        point_list = []
+        for surrounding_index in range(num_elements):
+            element = mesh.elementTable(node, surrounding_index)
+            element_index = mesh.elementIndexById(element.id())
+            point_list.append((xc[element_index], yc[element_index]))
 
-        # Use the elements that are connected to node i
-        # to construct a Voroni Polygon
-        pointList = []
-        for j in range(numElem):
-            # Build a polygon of centroids (vornoi diagram)
-
-            pointList.append((xc[mesh.elementTable(mesh.node(i),j).id()-1],
-                yc[mesh.elementTable(mesh.node(i),j).id()-1]))
-            
-        # Check if the mesh node is a boundary node.
-        # If so, then the Voroni Diagram should be constructed with
-        # the centroids as well as the mid-point along each boundary
-        # line segment and the node coordinates itself
-        if (mesh.node(i).id() in boundaryNodes):
-            #print 'Boundary node found...'
-       
-            # If a boundary node is outside the raster, then skip it
-            if ( not bboxPoly.contains(Point(mesh.node(i).x(),mesh.node(i).y())) ):
+        if node.id() in boundary_nodes:
+            if not bbox_polygon.contains(Point(node.x(), node.y())):
                 continue
-            
-            # Add current mesh node coordinates to polygon
-            pointList.append((mesh.node(i).x(),mesh.node(i).y()))
+            point_list.append((node.x(), node.y()))
 
-            if numElem == 1:
-                #print mesh.elementTable(mesh.node(i),0).id()
-                #print meshconn[mesh.elementTable(mesh.node(i),0).id()-1]
-                #n1 = meshconn[mesh.elementTable(mesh.node(i),0).id()-1][0]
-                #n2 = meshconn[mesh.elementTable(mesh.node(i),0).id()-1][1]
-                #n3 = meshconn[mesh.elementTable(mesh.node(i),0).id()-1][2]
-                for k in range(3):
-                    if meshconn[mesh.elementTable(mesh.node(i),0).id()-1][k] == mesh.node(i).id():
+            if num_elements == 1:
+                element = mesh.elementTable(node, 0)
+                element_index = mesh.elementIndexById(element.id())
+                for neighbor_id in meshconn[element_index]:
+                    if neighbor_id == node.id():
                         continue
+                    neighbor = mesh.node(mesh.nodeIndexById(neighbor_id))
+                    point_list.append(
+                        (
+                            0.5 * (node.x() + neighbor.x()),
+                            0.5 * (node.y() + neighbor.y()),
+                        )
+                    )
 
-                    neigh = mesh.nodeIndexById(meshconn[mesh.elementTable(mesh.node(i),0).id()-1][k])
+        if len(point_list) < 3:
+            continue
 
-                    xmid = 0.5 * (mesh.node(i).x() + mesh.node(neigh).x())
-                    ymid = 0.5 * (mesh.node(i).y() + mesh.node(neigh).y())
+        center = tuple(
+            map(
+                operator.truediv,
+                reduce(lambda first, second: list(map(operator.add, first, second)), point_list),
+                [len(point_list)] * 2,
+            )
+        )
+        point_list = sorted(
+            point_list,
+            key=lambda coord: (
+                -135
+                - math.degrees(
+                    math.atan2(*tuple(map(operator.sub, coord, center))[::-1])
+                )
+            )
+            % 360,
+        )
+        voronoi_polygon = Polygon(point_list)
+        if not voronoi_polygon.is_valid or voronoi_polygon.area == 0:
+            continue
 
-                    pointList.append((xmid,ymid))
-
-            '''
-            # Stil working on this ...
-
-                # Find the other line segments that
-                # Search the other nodes of the connected elements to find the 
-                # other two boundary nodes
-                for j in range(numElem):
-
-                    neighEl = mesh.elementTable(mesh.node(i),j).id() # This is an element IDs connected to node i
-                    #print neighEl
-                    print '' 
-
-                    # Find if any of the nodes that touch the surrounding elements are bondary nodes
-                    for k in range(3):
-                        if meshconn[mesh.elementTable(mesh.node(i),0).id()-1][k] == mesh.node(i).id():
-                            continue
-                        #print meshconn[mesh.elementTable(mesh.node(i),0).id()-1][k]
-                        
-                        if meshconn[neighEl-1][k] == mesh.node(i).id():
-                            continue
-                        if (meshconn[neighEl-1][k] in boundaryNodes):
-                            print meshconn[neighEl-1][k]
-
-                quit()
-
-                    #print meshconn[j] # This is the nodes that make up the element
-                    for k in range(3): # 3 b/c 3 nodes make up an element
-                        
-                        # Skip the current nodes as its already been added to pointList
-                        #if meshconn[j][k] == mesh.node(i).id():
-                        if meshconn[mesh.elementTable(mesh.node(i),0).id()-1][k] == mesh.node(i).id():
-                            continue
-
-                        if (meshconn[mesh.elementTable(mesh.node(i),0).id()-1][k] in boundaryNodes):
-                            print 'boundary node'    
-                            neigh = mesh.nodeIndexById(meshconn[mesh.elementTable(mesh.node(i),0).id()-1][k])
-                            xmid = 0.5 * (mesh.node(i).x() + mesh.node(neigh).x())
-                            ymid = 0.5 * (mesh.node(i).y() + mesh.node(neigh).y())
-                            
-                            pointList.append((xmid,ymid))
-
-                        #####
-                        # If one of the connected mesh nodes is on the boundary,
-                        # then find the mid-point to the current mesh node
-                        # and add that to pointList
-                        #if (meshconn[j][k] in boundaryNodes):
-                        if (meshconn[mesh.elementTable(mesh.node(i),0).id()-1][k] in boundaryNodes):
-                            print meshconn[mesh.elementTable(mesh.node(i),0).id()-1][k]
-                            # Find mid-point and add to pointList
-                            neigh = mesh.nodeIndexById(meshconn[mesh.elementTable(mesh.node(i),0).id()-1][k])
-                            
-                            xmid = 0.5 * (mesh.node(i).x() + mesh.node(neigh).x())
-                            ymid = 0.5 * (mesh.node(i).y() + mesh.node(neigh).y())
-                            #xmid = 0.5 * (mesh.node(i).x() + mesh.node(mesh.nodeIndexById(meshconn[j][k])).x())
-                            #ymid = 0.5 * (mesh.node(i).y() + mesh.node(mesh.nodeIndexById(meshconn[j][k])).y())
-                            
-                            pointList.append((xmid,ymid))
-                        ####
-        '''
-
-        # Sort the points in a clockwise fashion
-        # https://stackoverflow.com/questions/51074984/sorting-according-to-clockwise-point-coordinates
-        center = tuple(map(operator.truediv, reduce(lambda x, y: list(map(operator.add, x, y)), pointList), [len(pointList)] * 2))
-        pointList = (sorted(pointList, key=lambda coord: (-135 - math.degrees(math.atan2(*tuple(map(operator.sub, coord, center))[::-1]))) % 360))
-        '''   
-        if mesh.node(i).id() == 9775:
-            rows = zip(pointList)
-            with open('VoroniDiagram.csv', 'wb') as myfile:
-                    wr = csv.writer(myfile,sys.stdout, delimiter="\t", quoting = csv.QUOTE_NONE)
-                    #wr.writerow(pointList)
-                    for row in rows:
-                        wr.writerow(row)
-            quit()
-        ''' 
-        
-        # Generate a polygon of the pointList
-        vor = Polygon(pointList)
-
-        # Mapping converts the vor polygon to a GeoJSON-like mapping of a geometric object.
-        # This is needed for the mask operation below
-        geoms = [mapping(vor)]
-        # https://rasterio.readthedocs.io/en/stable/api/rasterio.mask.html
-        # https://rasterio.readthedocs.io/en/stable/topics/masking-by-shapefile.html
-        rbbox = []
-        with rasterio.open(raster) as src:
-            # Build the bounding box of the raster to check if it intersects
-            # the stencil for interpolation
-            rbbox.append((src.bounds[0],src.bounds[1])) # bottom left
-            rbbox.append((src.bounds[0],src.bounds[3])) # top left
-            rbbox.append((src.bounds[2],src.bounds[3])) # top right
-            rbbox.append((src.bounds[2],src.bounds[1])) # bottom right
-            rbbox = Polygon(rbbox)
-            # p1.intersects(p2) is true if p1 intersects p2
-            if not (rbbox.intersects(vor)):
+        with rasterio.open(raster) as source:
+            raster_polygon = box(*source.bounds)
+            if not raster_polygon.intersects(voronoi_polygon):
                 continue
-            ndv = src.nodata
-            out_image, out_transform = mask(src,geoms,crop=True)
-        # For Debugging
-        # Writes out the masked raster
-        # https://rasterio.readthedocs.io/en/stable/topics/masking-by-shapefile.html
-        '''
-        out_meta = src.meta
-        out_meta.update({"driver": "GTiff",
-            "height": out_image.shape[1],
-            "width" : out_image.shape[2],
-            "transform": out_transform})
-        with rasterio.open("01_test.tif", "w", **out_meta) as dest:
-            dest.write(out_image)
-        quit()
-        '''
+            out_image, _ = mask(
+                source,
+                [mapping(voronoi_polygon)],
+                crop=True,
+                filled=False,
+            )
 
-        # Convert the subset matrix to an array
-        subset = np.asarray(out_image)
-        # Remove no data values to mitigate any overflow issues
-        subset = subset[subset > ndv]
-        subset = subset * mfac
-        numvaluesgathered[i] = numvaluesgathered[i] + subset.size
-        values[i] = values[i] + np.sum(subset)
+        subset = out_image.compressed() * multiplication_factor
+        subset = subset[np.isfinite(subset)]
+        if subset.size == 0:
+            continue
+        num_values_gathered[index] += subset.size
+        values[index] += np.sum(subset)
 
-    return(values,numvaluesgathered)
-   
-#----------------------------------------------------------
-# F U N C T I O N    M E S H C O N N E C T I V I T Y
-#----------------------------------------------------------
-#
-# Finds the connectivitiy of the mesh includes elemental
-# connectivity and the boundary nodes
-# result = function(mesh)
-#----------------------------------------------------------
+    return values, num_values_gathered
+
+
 def meshconnectivity(mesh):
-
+    """Return element connectivity, centroids, and topological boundary IDs."""
     meshconn = mesh.connectivity()
-
-    # Find the centroid of the elements
     xc = np.zeros(mesh.numElements())
     yc = np.zeros(mesh.numElements())
-    for i in range(mesh.numElements()-1):
 
-        x1 = mesh.node(mesh.nodeIndexById(meshconn[i][0])).x()
-        x2 = mesh.node(mesh.nodeIndexById(meshconn[i][1])).x()
-        x3 = mesh.node(mesh.nodeIndexById(meshconn[i][2])).x()
-        
-        y1 = mesh.node(mesh.nodeIndexById(meshconn[i][0])).y()
-        y2 = mesh.node(mesh.nodeIndexById(meshconn[i][1])).y()
-        y3 = mesh.node(mesh.nodeIndexById(meshconn[i][2])).y()
+    for index, node_ids in enumerate(meshconn):
+        if len(node_ids) != 3:
+            raise ValueError("griddata interpolation requires triangular elements")
+        nodes = [mesh.node(mesh.nodeIndexById(node_id)) for node_id in node_ids]
+        xc[index] = sum(node.x() for node in nodes) / 3.0
+        yc[index] = sum(node.y() for node in nodes) / 3.0
 
-        # Calculate the centroid (xc,yc)
-        xc[i] = (x1 + x2 + x3) / 3
-        yc[i] = (y1 + y2 + y3) / 3
+    boundary_nodes = [int(node.id()) for node in mesh.boundaryNodes()]
+    return meshconn, xc, yc, boundary_nodes
 
-    # Grab the mesh nodes along the boundary
-    boundaryNodesPntr = mesh.boundaryNodes()
-    boundaryNodes = []
-    for i in range(len(boundaryNodesPntr)):
-        boundaryNodes.append(int(boundaryNodesPntr[i].id()))
 
-    return meshconn, xc, yc, boundaryNodes
+def gathervalues(
+    mesh,
+    raster,
+    cell_radii,
+    control_areas,
+    multiplication_factor,
+    values,
+    num_values_gathered,
+):
+    """Gather raster values from square control areas around mesh nodes."""
+    with open_raster(raster) as data:
+        num_cols, num_rows = get_numrowcol(data)
+        raster_values = read_band_as_array(data, masked=True).astype(float)
+        raster_values *= multiplication_factor
+        raster_size = get_rastersize(data)
+        bbox = get_boundingbox(data)
 
-#----------------------------------------------------------
-# F U N C T I O N    G A T H E R V A L U E S      
-#----------------------------------------------------------
-#
-# Sums up the raster pixel values within stencil
-# result = function(mesh, raster, values, numvaluesgathered)
-#----------------------------------------------------------
-def gathervalues(mesh,raster,N,CA,mfac,values,numvaluesgathered):
+        for index in range(mesh.numNodes()):
+            node = mesh.node(index)
+            if node.z() > -999.0:
+                continue
 
-    data = gdal.Open(raster, gdal.GA_ReadOnly)
-    # Find the total number of rows and columns in the raster
-    numcols, numrows = get_numrowcol(data)
-    # Go ahead and load up raster values
-    band = data.GetRasterBand(1)
-    band.SetNoDataValue(-9999)
-    vals = band.ReadAsArray()
-    vals = vals * mfac
+            radius = int(cell_radii[index])
+            coordinate_radius = (radius + 1) * raster_size
+            if (
+                node.x() < bbox[0] - coordinate_radius
+                or node.x() > bbox[2] + coordinate_radius
+                or node.y() < bbox[1] - coordinate_radius
+                or node.y() > bbox[3] + coordinate_radius
+            ):
+                continue
 
-    rastersize = get_rastersize(data)
-    
-    bbox = get_boundingbox(data)
-    bboxPoly = box(bbox[0],bbox[1],bbox[2],bbox[3])
-    
-    for i in range(mesh.numNodes()):
+            if num_values_gathered[index] == control_areas[index]:
+                continue
 
-        # Check if node is inside the raster bbox + some buffer
-        # Only interpolate on flagged nodes
-        if mesh.node(i).z() > -999.0:
-            continue
+            col, row = coord2pixel(node.x(), node.y(), data)
+            if col < 0 or row < 0:
+                continue
 
-        # Check to make sure mesh node is inside the raster
-        # plus some buffer = rastersize * N 
-        if ( mesh.node(i).x() < bbox[0] - (N[i]+1*rastersize) ) or \
-                ( mesh.node(i).x() > bbox[2] + (N[i]+1*rastersize) ) or \
-                ( mesh.node(i).y() < bbox[1] - (N[i]+1*rastersize) ) or \
-                ( mesh.node(i).y() > bbox[3] + (N[i]+1*rastersize) ):
-            continue
+            left = max(col - radius, 0)
+            right = min(col + radius + 1, num_cols)
+            top = max(row - radius, 0)
+            bottom = min(row + radius + 1, num_rows)
+            if left >= right or top >= bottom:
+                continue
 
-        # Check if the total number of cells have already been acquired
-        if (numvaluesgathered[i] == CA[i]):
-            continue
-
-        # Check if part of the stencil is inside the raster
-        col, row  = coord2pixel(mesh.node(i).x(),mesh.node(i).y(),data)
-        
-        #print "# Rows, # Columns ",numrows,numcols
-        #print "Row, Column ",row, col
-
-        # Get the stencil size in number of rows/cols around the current row/col
-        # Left to right and top to bottom nomenclature
-        left = int(col - N[i])
-        bottom = int(row + N[i])
-        right = int(col + N[i])
-        top = int(row - N[i])
-        
-        # Check for negative col/row values in the stencil
-        #if ( (left < 0) and (bottom < 0) ):
-            #continue
-        if top < 0:
-            top = 0
-        if bottom < 0:
-            bottom = 0
-        if left < 0:
-            left = 0
-        if right < 0:
-            right = 0
-
-        # Find the x,y coordinates of the stencil and build polygon
-        xmin,ymin = pixel2coord(left,bottom,data)
-        xmax,ymax = pixel2coord(right,top,data)
-        stencilPoly = box(xmin,ymin,xmax,ymax)
-        
-        if (not stencilPoly.touches(bboxPoly)):
-            # Find which stencil cells are contained in the raster
-            subset = vals[top:bottom,left:right]
-            
-            # Convert the subset matrix to an array
-            subset = np.asarray(subset)
-
-            # Remove no data values to mitigate any overflow issues
-            subset = subset[subset >= -999]
-            subset = subset[subset <= 999]
-            
-            # Check to make sure there are valid elevations in the stencil
+            subset = raster_values[top:bottom, left:right].compressed()
+            subset = subset[np.isfinite(subset)]
+            subset = subset[(subset >= -999) & (subset <= 999)]
             if subset.size == 0:
                 continue
 
-            # Check for vertical/raised feature nodes
-            if mesh.node(i).z() == -2000:
-
-                # Find the mean and standard deviation
+            if node.z() == -2000:
                 mean = np.average(subset)
-                std = np.std(subset)
-
-                # If the node is in the bounds of more than 1 raster,
-                # then keep the highest (minimum for ADCIRC) value.
-                if ( (mean - 2*std) < np.min(subset) ):
-
-                    values[i] = np.min(subset)
-                    numvaluesgathered[i] = -2000
-
+                standard_deviation = np.std(subset)
+                threshold = mean - 2 * standard_deviation
+                if threshold < np.min(subset):
+                    values[index] = np.min(subset)
                 else:
-
-                    subset = subset[subset <= (mean - 2*std)]
-                    values[i] = np.mean(subset)
-                    numvaluesgathered[i] = -2000
-                
-                print(('Mesh Node ',mesh.node(i).id(),' is a raised feature node w/ elevation: ',values[i]))
-                
-            # Not flagged as a vertical/raised feature node
+                    raised_values = subset[subset <= threshold]
+                    values[index] = (
+                        np.mean(raised_values) if raised_values.size else np.min(subset)
+                    )
+                num_values_gathered[index] = -2000
             else:
+                values[index] += np.sum(subset)
+                num_values_gathered[index] += subset.size
 
-                # Sum values in the stencil
-                values[i] = values[i] + np.sum(subset)
-                numvaluesgathered[i] = numvaluesgathered[i] + np.size(subset)
-        
-        else:
-            
-            print((i+1,'Does not overlap'))
-            continue
-    
-    return(values,numvaluesgathered)
-#----------------------------------------------------------
-    
+    return values, num_values_gathered
 
-#----------------------------------------------------------
-# F U N C T I O N    I N T E R P O L A T E        
-#----------------------------------------------------------
-#
-# Cycle through a list of rasters and interpolate
-# DEM values to the mesh.
-# result = function(mesh, rasterlist)
-#----------------------------------------------------------
-def interpolate(mesh,rasterlist,minBathyDepth,mfac,imethod):
-    # Grab list of raster files
-    f = open(rasterlist,'r')
-    files = f.readlines()
-    val = np.zeros(mesh.numNodes())
-    numval = np.zeros(mesh.numNodes())
-   
-    # Compute the local mesh size (meters)
+
+def _raster_paths(raster_list):
+    raster_list = Path(raster_list)
+    base_directory = raster_list.resolve().parent
+    paths = []
+    for line in raster_list.read_text(encoding="utf-8").splitlines():
+        value = line.strip()
+        if value and not value.startswith("#"):
+            path = Path(value.split()[0])
+            paths.append(str(path if path.is_absolute() else base_directory / path))
+    return paths
+
+
+def interpolate(mesh, raster_list, minimum_bathymetric_depth, multiplication_factor, method):
+    """Interpolate every flagged mesh node from the listed DEM rasters."""
+    if method not in ("CA", "griddata"):
+        raise ValueError("Unknown interpolation method: {}".format(method))
+
+    raster_paths = _raster_paths(raster_list)
+    if not raster_paths:
+        raise ValueError("Raster list does not contain any raster paths")
+
+    values = np.zeros(mesh.numNodes())
+    num_values = np.zeros(mesh.numNodes())
     mesh.size = mesh.computeMeshSize()
 
-    if imethod == "griddata":
-        print('Computing mesh connectivity...')
-        meshconn, xc, yc, boundaryNodes = meshconnectivity(mesh)
-        print('done!')
+    if method == "griddata":
+        print("Computing mesh connectivity...")
+        meshconn, xc, yc, boundary_nodes = meshconnectivity(mesh)
+        print("done!")
 
-    rastersize = 0
-    for f in files:
-        print(f)
-        # Cycle through each raster
-        if imethod == "CA":
-            # Check to see if raster size changed
-            data = gdal.Open(f.split()[0], gdal.GA_ReadOnly)
-            newrastersize = get_rastersize(data)
-            if (abs(rastersize-newrastersize) > 0.10): # Raster size changed > 10 cm
-                # Re-calculate N and CA based on the updated raster size
-                print(('Raster size changed from ',rastersize,' to ',newrastersize,'. Re-calculating N & CA.'))
-                rastersize = newrastersize
-                numCells = compute_numcells(mesh,rastersize)
-                numCells = np.asarray(numCells)
-                N = numCells[0,:]
-                CA = numCells[1,:]
+    raster_size = None
+    cell_radii = None
+    control_areas = None
+    for raster in raster_paths:
+        print(raster)
+        if method == "CA":
+            with open_raster(raster) as data:
+                new_raster_size = get_rastersize(data)
+            if raster_size is None or abs(raster_size - new_raster_size) > 0.10:
+                print(
+                    "Raster size changed from {} to {}. Re-calculating control areas.".format(
+                        raster_size or 0.0, new_raster_size
+                    )
+                )
+                raster_size = new_raster_size
+                cell_radii, control_areas = compute_numcells(mesh, raster_size)
 
-            a,b = gathervalues(mesh,f.split()[0],N,CA,mfac,val,numval)
-        elif imethod == "griddata":
-            a,b = griddata(mesh,meshconn,xc,yc,boundaryNodes,f.split()[0],mfac,val,numval)
-        val = a
-        numval = b
-
-    interpvalues = np.zeros(mesh.numNodes())
-    for i in range(mesh.numNodes()):
-
-        if (numval[i] == 0):
-
-            interpvalues[i] = mesh.node(i).z()
-
-        elif (numval[i] == -2000):
-
-            interpvalues[i] = val[i]
-
-        elif (numval[i] != 0):
-
-            interpvalues[i] = val[i] / numval[i]
-
-        # Check for minimum bathy depth
-        #if interpvalues[i] >= 0 and interpvalues[i] < minBathyDepth:
-            #interpvalues[i] = minBathyDepth
-    
-    mesh.setZ(interpvalues)
-    
-    return mesh
-#----------------------------------------------------------
-
-
-#----------------------------------------------------------
-# F U N C T I O N    C O M P U T E _ N U M C E L L S
-#----------------------------------------------------------
-#
-# Compute the total numhber of DEM cells that should be 
-# interpolated for each mesh node using the CCA method
-# of Bilskie & Hagen (2013)
-# result = function(mesh, rastersize)
-#----------------------------------------------------------
-def compute_numcells(mesh,rastersize):
-
-    # mesh -> mesh object
-    # rastersize -> floating point of DEM cell size
-
-    # Reproject the mesh to UTM coordinates
-    #mesh.reproject(26916)
-
-    sfactor = np.ones(mesh.numNodes())
-    for i in range(mesh.numNodes()):
-        
-        if (mesh.node(i).z() < -1001 ) and (mesh.node(i).z() > -1100) :
-            sfactor[i] = mesh.node(i).z()*-1 - 1000
-        
-        # values of -2000 or less are flagged as vertical/raised feature nodes
-        elif (mesh.node(i).z() == -2000):
-            sfactor[i] = 2.0
-        
+            values, num_values = gathervalues(
+                mesh,
+                raster,
+                cell_radii,
+                control_areas,
+                multiplication_factor,
+                values,
+                num_values,
+            )
         else:
-            sfactor[i] = 1.0
-    
-    # Compute N (# of DEM cells radiating omnidirectionally form the cell center)
-    N = [(0.25*x)/rastersize for x in mesh.size]
-    N = N * sfactor
-    # Compute the total number of DEM cells to average
-    N = np.asarray(N)
-    N = np.round(N)
-    CA = np.piecewise(N, [N < 1, N >= 1], [1, (2*N+1)**2])
-    return N, CA
-#----------------------------------------------------------
+            values, num_values = griddata(
+                mesh,
+                meshconn,
+                xc,
+                yc,
+                boundary_nodes,
+                raster,
+                multiplication_factor,
+                values,
+                num_values,
+            )
+
+    interpolated_values = np.zeros(mesh.numNodes())
+    for index in range(mesh.numNodes()):
+        if num_values[index] == 0:
+            interpolated_values[index] = mesh.node(index).z()
+        elif num_values[index] == -2000:
+            interpolated_values[index] = values[index]
+        else:
+            interpolated_values[index] = values[index] / num_values[index]
+
+        if 0 <= interpolated_values[index] < minimum_bathymetric_depth:
+            interpolated_values[index] = minimum_bathymetric_depth
+
+    mesh.setZ(interpolated_values)
+    return mesh
+
+
+def compute_numcells(mesh, raster_size):
+    """Compute raster-cell radii and expected control-area sizes per node."""
+    if raster_size <= 0:
+        raise ValueError("Raster size must be positive")
+
+    scale_factors = np.ones(mesh.numNodes())
+    for index in range(mesh.numNodes()):
+        elevation = mesh.node(index).z()
+        if -1100 < elevation < -1001:
+            scale_factors[index] = -elevation - 1000
+        elif elevation == -2000:
+            scale_factors[index] = 2.0
+
+    cell_radii = (0.25 * np.asarray(mesh.size)) / raster_size
+    cell_radii = np.round(cell_radii * scale_factors)
+    control_areas = np.where(cell_radii < 1, 1, (2 * cell_radii + 1) ** 2)
+    return cell_radii, control_areas

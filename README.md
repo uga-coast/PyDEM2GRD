@@ -3,13 +3,38 @@ Interpolate a digital elevation model (DEM) to an ADCIRC unstructured mesh.
 
 ## Getting Started
 
-These instructions will get you a copy of the project up and running on your local machine for development and testing purposes. See deployment for notes on how to deploy the project on a live system.
+Create the Conda environment and install the project:
 
-python -m pydem2grd
+```bash
+conda env create -f environment.yml
+conda activate pydem2grd
+```
+
+Or install it into an existing Python environment:
+
+```bash
+python -m pip install -e .
+```
+
+```bash
+python -m pydem2grd INPUT_FORT14 OUTPUT_FORT14 RASTER_LIST
+```
+
+Installing the project also provides the equivalent `pydem2grd` command.
+
+For example:
+
+```bash
+python -m pydem2grd example/mesh_x1002.grd interpolated.grd rasterlist.txt
+```
+
+Run `python -m pydem2grd --help` for interpolation method, multiplication
+factor, and minimum-depth options.
 
 The following is a list of nodal flag values that are accepted.
-* -1000/-1001: Automatic CAA method of Bilskie and Hagen (2012). This flag value will create the most topographically accurate surface.
-* -10XX: Flagged values less than -1001 will use a CAA * XX value. This is used for smoothing. For example, a flag value of -1002 will mutliple the default CAA value by 2 thereby increasing the control volume/stencil by 2. A flag value of -1002 is a good choice that balances topographic accuracy and smoothness of the topobathy required for a numerical simulation.
+
+* -1000/-1001: Automatic CA method of Bilskie and Hagen (2012). This flag value will create the most topographically accurate surface.
+* -10XX: Flagged values less than -1001 use a CA scale factor of XX. This is used for smoothing. For example, -1002 multiplies the default control-area radius by 2, increasing the interpolation stencil.
 * -2000: This flag is used for vertical/raised feature nodes. Elevation values larger than mean + 2*sigma are averaged so the crown of a feature is captured.
 
 ## Docker
@@ -20,42 +45,33 @@ https://hub.docker.com/r/mbilskie/pydem2grd/tags
 
 docker pull mbilskie/pydem2grd:1
 
-## Prerequisites
+## Dependencies
 
-What things you need to install the software and how to install them
+* [NumPy](https://numpy.org/)
+* [Shapely](https://shapely.readthedocs.io/en/stable/)
+* [Rasterio](https://rasterio.readthedocs.io/en/stable/)
 
-* [ADCIRC Modules](https://github.com/zcobell/ADCIRCModules)
-* [GDAL](https://pypi.org/project/GDAL/)
-* [shapely](https://shapely.readthedocs.io/en/stable/)
-* [rasterio](https://rasterio.readthedocs.io/en/stable/#)
+ADCIRC `fort.14`/`.grd` files are read and written natively. Boundary sections
+are retained when a mesh is written, while boundary nodes used by interpolation
+are derived from the element topology.
 
-### Installing
+```python
+from pydem2grd import Mesh
 
-A step by step series of examples that tell you how to get a development env running
-
-Say what the step will be
-
+mesh = Mesh.from_file("fort.14")
+mesh.write("fort-updated.14")
 ```
-Give the example
-```
-
-And repeat
-
-```
-until finished
-```
-
-End with an example of getting some data out of the system or using it for a little demo
 
 ## Running the tests
 
-Explain how to run the automated tests for this system
-
-### Break down into end to end tests
+```bash
+python -m unittest discover -s tests
+```
 
 ## Built With
 
-* [ADCIRC Modules](https://github.com/zcobell/ADCIRCModules) - The ADCIRC file I/O used
+* Native Python ADCIRC `fort.14` mesh I/O
+* Rasterio-based DEM access (no direct `osgeo.gdal` dependency)
 
 ## Contributing
 
@@ -94,7 +110,8 @@ This project is still under development.
 
 ## License
 
-This project is licensed under the *** License - see the [LICENSE.md](LICENSE.md) file for details
+This project is licensed under the GNU General Public License v3.0; see
+[`LICENSE`](LICENSE) for details.
 
 ## Acknowledgments
 
