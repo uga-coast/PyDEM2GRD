@@ -10,6 +10,8 @@ import rasterio
 from rasterio.mask import mask
 from shapely.geometry import Point, Polygon, box, mapping
 
+from pydem2grd.workflow import round_half_up
+
 from .raster import (
     coord2pixel,
     get_boundingbox,
@@ -183,7 +185,6 @@ def gathervalues(
 
             subset = raster_values[top:bottom, left:right].compressed()
             subset = subset[np.isfinite(subset)]
-            subset = subset[(subset >= -999) & (subset <= 999)]
             if subset.size == 0:
                 continue
 
@@ -304,7 +305,11 @@ def compute_numcells(mesh, raster_size):
         elif elevation == -2000:
             scale_factors[index] = 2.0
 
-    cell_radii = (0.25 * np.asarray(mesh.size)) / raster_size
-    cell_radii = np.round(cell_radii * scale_factors)
-    control_areas = np.where(cell_radii < 1, 1, (2 * cell_radii + 1) ** 2)
+    raw_radii = (0.25 * np.asarray(mesh.size)) / raster_size
+    base_radii = np.asarray(
+        [0 if radius < 1 else round_half_up(radius) for radius in raw_radii],
+        dtype=int,
+    )
+    cell_radii = (base_radii * scale_factors).astype(int)
+    control_areas = np.where(cell_radii == 0, 1, (2 * cell_radii + 1) ** 2)
     return cell_radii, control_areas
