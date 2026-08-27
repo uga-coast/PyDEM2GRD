@@ -16,26 +16,134 @@ Or install it into an existing Python environment:
 python -m pip install -e .
 ```
 
+Installing the project also provides the equivalent `pydem2grd` command. The
+preferred workflow uses a complete JSON configuration:
+
 ```bash
-python -m pydem2grd INPUT_FORT14 OUTPUT_FORT14 RASTER_LIST
+pydem2grd config.json
 ```
 
-Installing the project also provides the equivalent `pydem2grd` command.
+The repository includes a runnable example:
+
+```bash
+pydem2grd example/config.json
+```
+
+Relative paths are resolved from the directory containing `config.json`. A
+minimal seamless topo-bathy example is:
+
+```json
+{
+  "input_mesh": "mesh/fort.14",
+  "output_mesh": "output/interpolated.14",
+  "crs": "EPSG:26917",
+  "elevation_multiplication_factor": 1.0,
+  "node_flags": {
+    "bathy": -9999,
+    "topo": 9999
+  },
+  "unresolved_report": "output/unresolved.csv",
+  "raster_sets": [
+    {
+      "name": "Seamless topo-bathy DEM",
+      "tiles": ["dem/tile_01.tif", "dem/tile_02.tif"],
+      "rules": [
+        {
+          "node_flags": ["bathy"],
+          "domain": "bathy",
+          "method": "direct_lookup",
+          "land_threshold": 0.0,
+          "minimum_depth": 1.0,
+          "multiplication_factor": -1.0
+        },
+        {
+          "node_flags": ["topo"],
+          "domain": "topo",
+          "method": "CA",
+          "smoothing_factor": 2
+        }
+      ]
+    }
+  ]
+}
+```
+
+Node-flag names are user-defined. Only nodes whose existing z-value equals a
+configured sentinel are changed. Ordinary mesh elevations remain untouched,
+and unresolved flagged nodes retain their original sentinel.
+
+The original positional interface remains available:
+
+```bash
+pydem2grd INPUT_FORT14 OUTPUT_FORT14 RASTER_LIST
+```
 
 For example:
 
 ```bash
-python -m pydem2grd example/mesh_x1002.grd interpolated.grd rasterlist.txt
+pydem2grd example/mesh_x1002.grd interpolated.grd rasterlist.txt
 ```
 
-Run `python -m pydem2grd --help` for interpolation method, multiplication
-factor, and minimum-depth options.
+The legacy nodal flags remain supported by that interface:
 
-The following is a list of nodal flag values that are accepted.
+* `-1000`/`-1001`: automatic CA method.
+* `-10XX`: apply the encoded smoothing factor `XX` after establishing the
+  integer base radius.
+* `-2000`: retain the historical raised-feature processing behavior.
 
-* -1000/-1001: Automatic CA method of Bilskie and Hagen (2012). This flag value will create the most topographically accurate surface.
-* -10XX: Flagged values less than -1001 use a CA scale factor of XX. This is used for smoothing. For example, -1002 multiplies the default control-area radius by 2, increasing the interpolation stencil.
-* -2000: This flag is used for vertical/raised feature nodes. Elevation values larger than mean + 2*sigma are averaged so the crown of a feature is captured.
+The CLI `--multiplication-factor` converts raster elevation units or sign; it
+does not control CA smoothing. Run `pydem2grd --help` for all legacy options.
+
+## Cell-area interpolation
+
+The CA method follows Bilskie and Hagen (2013). Local mesh size
+`Delta_M` is the arithmetic mean of the lengths of all unique mesh edges
+incident to a node. The continuous base radius is:
+
+```text
+N_raw = 0.25 * Delta_M / Delta_DEM
+```
+
+If `N_raw < 1`, PyDEM2GRD directly looks up the raster cell containing the
+node. Otherwise it converts `N_raw` to an integer using conventional half-up
+rounding. The integer base radius is then multiplied by the rule's smoothing
+factor. Radius `r` requests a centered `(2r + 1) x (2r + 1)` stencil. A
+smoothing factor therefore extends the radius, not the final cell count.
+
+At the outer coverage boundary the stencil remains centered and the
+unavailable portion is clipped; it is never shifted or enlarged. Masked,
+declared NoData, and nonfinite values are excluded. There is no arbitrary
+elevation-range filter.
+
+## Raster priority, tiling, and rules
+
+Raster sets are evaluated in JSON order. Tiles within one set are equal-priority
+pieces of one logical DEM and collectively fill a stencil. Overlapping tiles
+contribute at most one value per cell; conflicting valid values at the same
+aligned cell are reported as an error. Later raster sets fill only locations
+left unresolved by earlier sets and never overwrite higher-priority values. A
+fallback rule contributes only where its own method and smoothing footprint
+overlaps the stencil established by the first contributing raster set.
+
+Every tile in a raster set must use the mesh CRS, square north-up pixels, one
+resolution, and an aligned grid. Lower-priority sets may fill individual gaps
+only when their grids are compatible with the stencil's established grid. An
+incompatible lower-resolution or shifted grid is rejected if it would be
+needed to complete a partial stencil. If a higher-priority set contributes no
+values at all, the next eligible set may establish a new stencil using its own
+native resolution. Automatic reprojection and resampling are intentionally not
+performed.
+
+Rules associate node-flag classes with per-raster-set behavior. `topo` rules
+use every otherwise valid elevation, including values below datum. `bathy`
+rules accept only raster values below `land_threshold` (default `0.0`). Minimum
+depth is applied only to bathymetric results. A rule may override the global
+elevation multiplication factor.
+
+At completion, PyDEM2GRD reports flagged, updated, and unresolved counts for
+each node-flag class. It also writes an unresolved-node CSV beside the output
+mesh unless `unresolved_report` specifies another path. The CSV includes node
+ID, coordinates, flag class, original sentinel, and reason.
 
 ## Docker
 

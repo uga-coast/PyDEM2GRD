@@ -1,0 +1,26 @@
+{
+  "input_mesh": "mesh_x1002.grd",
+  "output_mesh": "../interpolated.grd",
+  "crs": "EPSG:6346",
+  "elevation_multiplication_factor": -1.0,
+  "node_flags": {
+    "topo": -1002
+  },
+  "unresolved_report": "../interpolated.unresolved.csv",
+  "raster_sets": [
+    {
+      "name": "Example Georgia DEM",
+      "tiles": [
+        "Example_DEM_GA.tif"
+      ],
+      "rules": [
+        {
+          "node_flags": ["topo"],
+          "domain": "topo",
+          "method": "CA",
+          "smoothing_factor": 2
+        }
+      ]
+    }
+  ]
+}
